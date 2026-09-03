@@ -1,10 +1,5 @@
 import { config } from "../config";
-import type {
-  EffectiveSpendLimitRow,
-  OrgUser,
-  RbacGroup,
-  RbacGroupMember,
-} from "../types";
+import type { EffectiveSpendLimitRow, OrgUser } from "../types";
 
 const BASE_URL = "https://api.anthropic.com";
 
@@ -126,31 +121,6 @@ interface RawOrgUser {
 export async function listOrgUsers(apiKey: string): Promise<OrgUser[]> {
   const raw = await paginateAll<RawOrgUser>(apiKey, "/v1/organizations/users", { limit: "100" });
   return raw.map((u) => ({ id: u.id, email: u.email, name: u.name ?? null, role: u.role }));
-}
-
-interface RawRbacGroup {
-  id: string;
-  name: string;
-}
-
-export async function listRbacGroups(apiKey: string): Promise<RbacGroup[]> {
-  const raw = await paginateAll<RawRbacGroup>(apiKey, "/v1/organizations/rbac_groups", { limit: "100" });
-  return raw.map((g) => ({ id: g.id, name: g.name }));
-}
-
-interface RawRbacGroupMember {
-  user_id: string;
-  email: string;
-  group_id: string;
-}
-
-export async function listRbacGroupMembers(apiKey: string, groupId: string): Promise<RbacGroupMember[]> {
-  const raw = await paginateAll<RawRbacGroupMember>(
-    apiKey,
-    `/v1/organizations/rbac_groups/${encodeURIComponent(groupId)}/members`,
-    { limit: "100" }
-  );
-  return raw.map((m) => ({ userId: m.user_id, email: m.email, groupId: m.group_id ?? groupId }));
 }
 
 export async function listEffectiveSpendLimits(apiKey: string): Promise<EffectiveSpendLimitRow[]> {

@@ -1,91 +1,58 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
 import { requireAdminApiKey } from "../middleware/adminKey";
-import { getOrgGroups, getGroupMembership, getOrgUsers } from "../services/orgDirectory";
+import { getOrgUsers } from "../services/orgDirectory";
 import { deleteSpendLimit, listEffectiveSpendLimits, setUserSpendLimit } from "../services/anthropicAdmin";
+import { getAllGroupAssignments, isGroupMasterMissingOrEmpty } from "../services/groupMaster";
 import { errorDetail } from "../utils/errorDetail";
-import type { EffectiveSpendLimitRow, MemberView, SpendLimitSource } from "../types";
+import type { EffectiveSpendLimitRow, MemberView } from "../types";
 
 export const membersRouter = Router();
 membersRouter.use(requireAuth);
 membersRouter.use(requireAdminApiKey);
-
-function resolveSourceGroupId(source: SpendLimitSource, singleGroupFallback: string | null): string | null {
-  if (typeof source.rbac_group_id === "string") return source.rbac_group_id;
-  if (typeof source.group_id === "string") return source.group_id;
-  return singleGroupFallback;
-}
 
 async function buildMemberViews(apiKey: string): Promise<{
   members: MemberView[];
   groups: { id: string; name: string }[];
   groupsWarning?: string;
 }> {
-  // 이름/이메일/개인별 제한 조회는 이 서비스의 핵심 기능이므로 실패 시 그대로 오류를 던진다.
   const [users, effectiveRows] = await Promise.all([getOrgUsers(apiKey), listEffectiveSpendLimits(apiKey)]);
 
-  // RBAC 그룹 조회는 조직에 그룹이 없거나, 이 Admin API 키에 그룹 조회 권한이 없는 경우 실패할 수 있다.
-  // 그룹 정보가 없어도 이름/이메일/개인별 제한은 보여줄 수 있으므로, 실패해도 전체 요청을 막지 않는다.
-  let groups: { id: string; name: string }[] = [];
-  let groupMembership = new Map<string, string[]>();
-  let groupsWarning: string | undefined;
-  try {
-    groups = await getOrgGroups(apiKey);
-    groupMembership = await getGroupMembership(apiKey);
-  } catch (err) {
-    console.error("[members] group info unavailable, continuing without it", err);
-    groupsWarning =
-      errorDetail(err) ?? "그룹 정보를 불러오지 못했습니다. Admin API 키의 그룹 조회 권한/스코프를 확인해주세요.";
-  }
-
-  const groupNameById = new Map(groups.map((g) => [g.id, g.name] as const));
-
-  const userGroups = new Map<string, string[]>();
-  for (const [groupId, userIds] of groupMembership.entries()) {
-    for (const userId of userIds) {
-      const list = userGroups.get(userId) ?? [];
-      list.push(groupId);
-      userGroups.set(userId, list);
-    }
-  }
+  // 소속 그룹은 Anthropic RBAC 그룹 API 대신 group_master.env 의 "이메일 -> 그룹명" 매핑으로 결정한다.
+  const groupByEmail = getAllGroupAssignments();
 
   const rowByUserId = new Map<string, EffectiveSpendLimitRow>();
   for (const row of effectiveRows) {
     rowByUserId.set(row.actor.user_id, row);
   }
 
-  // 그룹 기준(baseline) 제한액 추정: 해당 그룹을 source 로 상속받고 있는 멤버의 effective amount 를 사용한다.
-  // 그룹의 모든 멤버가 개인별 override 를 갖고 있으면 baseline 을 알아낼 방법이 없다 (API 한계).
+  // 그룹 기준(baseline) 제한액: 같은(로컬) 그룹명을 가진 멤버 중, Anthropic 쪽에서 실제로 그룹(rbac_group)을
+  // source 로 상속받고 있는 멤버의 effective amount 를 그 그룹의 기준액으로 삼는다.
+  // group_master.env 의 그룹 구분은 Anthropic 의 실제 RBAC 그룹과는 별개의 로컬 분류이므로,
+  // Anthropic 쪽에서 그룹 기반 상속이 전혀 쓰이지 않는 조직이라면 항상 "확인 불가"로 남는다.
   const groupBaseline = new Map<string, { amount: string | null; currency: string }>();
   for (const row of effectiveRows) {
     if (row.source.type !== "rbac_group") continue;
-    const singleGroupFallback =
-      (userGroups.get(row.actor.user_id) ?? []).length === 1
-        ? (userGroups.get(row.actor.user_id) as string[])[0]
-        : null;
-    const groupId = resolveSourceGroupId(row.source, singleGroupFallback);
-    if (groupId && !groupBaseline.has(groupId)) {
-      groupBaseline.set(groupId, { amount: row.amount, currency: row.currency });
+    const groupName = groupByEmail.get(row.actor.email_address.toLowerCase());
+    if (groupName && !groupBaseline.has(groupName)) {
+      groupBaseline.set(groupName, { amount: row.amount, currency: row.currency });
     }
   }
 
   const members: MemberView[] = users.map((user) => {
     const row = rowByUserId.get(user.id);
-    const groupIds = userGroups.get(user.id) ?? [];
-    const groupNames = groupIds.map((id) => groupNameById.get(id) ?? id);
+    const groupName = groupByEmail.get(user.email.toLowerCase()) ?? null;
+    const groupNames = groupName ? [groupName] : [];
 
     const sourceType = row?.source.type ?? "unknown";
-    const singleGroupFallback = groupIds.length === 1 ? groupIds[0] : null;
-    const sourceGroupId =
-      row && sourceType === "rbac_group" ? resolveSourceGroupId(row.source, singleGroupFallback) : null;
 
     let groupBaselineAmount: string | null = null;
     let groupBaselineKnown = false;
     if (sourceType === "rbac_group" && row) {
       groupBaselineAmount = row.amount;
       groupBaselineKnown = true;
-    } else if (groupIds.length === 1 && groupBaseline.has(groupIds[0])) {
-      const baseline = groupBaseline.get(groupIds[0])!;
+    } else if (groupName && groupBaseline.has(groupName)) {
+      const baseline = groupBaseline.get(groupName)!;
       groupBaselineAmount = baseline.amount;
       groupBaselineKnown = true;
     }
@@ -95,14 +62,14 @@ async function buildMemberViews(apiKey: string): Promise<{
       email: user.email,
       name: user.name,
       role: user.role,
-      groupIds,
+      groupIds: groupNames,
       groupNames,
       effectiveAmount: row?.amount ?? null,
       currency: row?.currency ?? "USD",
       period: row?.period ?? "monthly",
       sourceType,
-      sourceGroupId,
-      sourceGroupName: sourceGroupId ? groupNameById.get(sourceGroupId) ?? sourceGroupId : null,
+      sourceGroupId: sourceType === "rbac_group" ? groupName : null,
+      sourceGroupName: sourceType === "rbac_group" ? groupName : null,
       spendLimitId: row?.spend_limit_id ?? "",
       periodToDateSpend: row?.period_to_date_spend ?? "0",
       hasIndividualOverride: sourceType === "user",
@@ -111,7 +78,12 @@ async function buildMemberViews(apiKey: string): Promise<{
     };
   });
 
-  return { members, groups: groups.map((g) => ({ id: g.id, name: g.name })), groupsWarning };
+  const groups = [...new Set(groupByEmail.values())].map((name) => ({ id: name, name }));
+  const groupsWarning = isGroupMasterMissingOrEmpty()
+    ? "group_master.env 파일을 찾을 수 없거나 비어 있습니다. 프로젝트 루트에 이메일-그룹 매핑을 추가해주세요."
+    : undefined;
+
+  return { members, groups, groupsWarning };
 }
 
 membersRouter.get("/", async (req, res) => {

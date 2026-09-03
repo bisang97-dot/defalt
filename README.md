@@ -34,6 +34,9 @@ cp .env.example .env
 # .env 파일을 열어 SESSION_SECRET 값을 채워주세요.
 # (현재 개발/테스트 모드에서는 CLAUDE_ADMIN_API_KEY, SMTP_* 는 필요 없습니다.)
 
+cp group_master.env.example group_master.env
+# group_master.env 를 열어 "이메일, 그룹명" 형식으로 실제 사내 인원을 채워주세요. (git에 커밋되지 않습니다.)
+
 npm run dev     # 개발 모드 (자동 재시작)
 # 또는
 npm run build && npm start   # 프로덕션 빌드 후 실행
@@ -66,27 +69,41 @@ npm run build && npm start   # 프로덕션 빌드 후 실행
 
 - 인증코드는 **단일 프로세스 메모리**에 저장됩니다. 서버를 재시작하면 발급된 코드가 모두 무효화됩니다. 여러 인스턴스로 스케일 아웃하려면 Redis 등 공유 저장소로 교체해야 합니다.
 - 이메일 발송 성공/실패와 무관하게 API 응답 메시지는 동일하게 유지되어 사용자 열거(enumeration) 공격을 방어하지만, 실제 발급 시도 여부(재전송 쿨다운 등)까지 완전히 감추지는 않습니다. 순수 내부망 배포를 전제로 한 실용적 타협입니다.
-- 조직 구성원/그룹 목록은 (Admin API 키별로) 30초 TTL로 캐시됩니다. 유효 스펜드 제한(`/spend_limits/effective`)은 매 요청마다 최신 값을 가져옵니다.
+- 조직 구성원 목록은 (Admin API 키별로) 30초 TTL로 캐시됩니다. 유효 스펜드 제한(`/spend_limits/effective`)은 매 요청마다 최신 값을 가져옵니다. `group_master.env` 는 파일이 바뀔 때만 다시 읽습니다.
 - **[개발/테스트 전용]** 화면에 노출되는 인증코드와 입력창에 넣는 Admin API 키는 누구나 화면을 보면 알 수 있으므로, 신뢰할 수 없는 사람이 접근 가능한 환경에서는 절대 이 모드로 배포하지 마세요.
 
-## 그룹 기준 제한 표시의 한계
+## 소속 그룹은 어디서 오는가 (`group_master.env`)
 
-Claude Admin API의 `GET /v1/organizations/spend_limits/effective` 는 **현재 적용 중인(effective)** 제한만 알려줍니다.
-어떤 멤버에게 개인별 override가 설정되어 있으면, 그 멤버가 override가 없었을 때 그룹에서 상속받았을 금액은 API가 직접 알려주지 않습니다.
+Anthropic Admin API의 그룹 조회(`GET /v1/organizations/rbac_groups`)는 조직에 따라 권한/스코프 문제로 이 서비스가 쓰는 Admin API 키로는 조회되지 않을 수 있습니다. 그래서 "소속 그룹" 정보는 Anthropic API가 아니라 **로컬 파일 `group_master.env`** 에서 가져옵니다.
 
-이 서비스는 같은 그룹의 다른 멤버 중 override가 없는 사람의 effective 값을 근거로 그룹 기준액을 추정합니다.
-그룹의 **모든** 멤버가 개인별 override를 갖고 있는 경우에는 그룹 기준액을 알 수 없어 화면에 "확인 불가"로 표시됩니다. 이는 Anthropic API 자체의 한계이며, 이를 우회하려면(override를 임시로 지웠다가 값을 확인 후 복원) 실제 한도가 일시적으로 풀리는 부작용이 있어 이 도구는 그런 방식을 사용하지 않습니다.
+- 프로젝트 루트의 `group_master.env` 파일에 한 줄씩 `이메일, "그룹명"` 형식으로 적어두면 로그인한 사용자의 소속 그룹으로 화면에 표시됩니다.
+- 예시:
+  ```
+  skim@lgacademy.com, "업무지원/재경"
+  sjyang@lgacademy.com, "리더교육센터"
+  ```
+- `#` 로 시작하는 줄과 빈 줄은 무시됩니다. 파일을 수정하면 서버 재시작 없이 다음 조회부터 바로 반영됩니다(파일 수정 시각 기준으로 캐시를 갱신).
+- 이 파일은 사내 인원 구성이 담겨 있으므로 git에 커밋되지 않습니다 (`.gitignore`). 형식만 보여주는 `group_master.env.example` 은 커밋되어 있습니다.
+- 파일 경로를 바꾸고 싶으면 `.env`에 `GROUP_MASTER_PATH=/절대/경로/group_master.env` 를 추가하세요.
+- 매핑에 없는 이메일은 소속 그룹이 "-" 로 표시됩니다 (오류가 아닙니다).
+
+### 그룹 기준 제한 표시의 한계
+
+`group_master.env` 의 그룹 구분은 Anthropic 쪽 실제 RBAC 그룹과는 무관한, 이 서비스만의 로컬 분류입니다. 반면 "그룹 기준 제한" 열은 Anthropic 의 `GET /v1/organizations/spend_limits/effective` 응답에서 그 멤버의 제한이 실제로 그룹(`rbac_group`)에서 상속되고 있을 때만 값을 알 수 있습니다. 따라서:
+
+- 조직이 Anthropic 쪽에서 그룹 기반 스펜드 제한을 아예 쓰지 않는다면(등급/조직 기본값만 쓰는 경우), 이 열은 항상 "확인 불가"로 표시됩니다 — API 한계가 아니라 애초에 존재하지 않는 값입니다.
+- 어떤 멤버가 Anthropic 그룹에서 상속받고 있는데 그 멤버에게 개인별 override 가 걸려 있으면(effective 값이 override로 가려짐), 같은 `group_master.env` 그룹명을 가진 다른 멤버 중 override 없이 그 Anthropic 그룹을 그대로 상속받고 있는 사람의 effective 값을 근거로 추정합니다. 그런 멤버가 한 명도 없으면 "확인 불가"로 남습니다.
 
 ## API 요약 (내부적으로 호출하는 Anthropic Admin API)
 
 | 용도 | 메서드/경로 |
 | --- | --- |
 | 구성원 목록 | `GET /v1/organizations/users` |
-| 그룹 목록 | `GET /v1/organizations/rbac_groups` |
-| 그룹 멤버 목록 | `GET /v1/organizations/rbac_groups/{group_id}/members` |
 | 멤버별 유효 토큰 제한 | `GET /v1/organizations/spend_limits/effective` |
 | 개인별 제한 설정(upsert) | `POST /v1/organizations/spend_limits` |
 | 개인별 제한 해제 | `DELETE /v1/organizations/spend_limits/{spend_limit_id}` |
+
+("소속 그룹"은 위 API가 아니라 로컬 `group_master.env` 파일에서 옵니다.)
 
 금액은 조직 결제 통화의 **최소 단위(minor unit, 예: 센트) 문자열**로 주고받습니다. 화면에는 이해하기 쉬운 소수(예: `500.00 USD`)로 환산해 보여줍니다.
 

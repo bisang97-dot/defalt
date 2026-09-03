@@ -1,5 +1,7 @@
 node_modules/
 dist/
 .env
+# 이메일-그룹 매핑 파일. 사내 인원 구성이 담겨 있으므로 커밋하지 않는다 (group_master.env.example 참고).
+group_master.env
 *.log
 .DS_Store
