@@ -35,6 +35,14 @@ async function buildMemberViews(
   const groupByEmail = getAllGroupAssignments();
   const users = allUsers.filter((user) => groupByEmail.get(user.email.toLowerCase()) === myGroup);
 
+  // 진단용: group_master.env 에는 이 그룹으로 적혀 있지만 Admin API 조직 구성원 목록에서는 찾지 못한 이메일이 있으면 알려준다.
+  // (오타, 이 Admin API 키가 관리하는 조직에 아직 없는 계정, 다른 조직 소속 등 조용히 누락되는 원인을 바로 보여준다.)
+  const foundEmails = new Set(allUsers.map((u) => u.email.toLowerCase()));
+  const configuredEmailsForMyGroup = [...groupByEmail.entries()]
+    .filter(([, group]) => group === myGroup)
+    .map(([email]) => email);
+  const unmatchedGroupEmails = configuredEmailsForMyGroup.filter((email) => !foundEmails.has(email));
+
   const rowByUserId = new Map<string, EffectiveSpendLimitRow>();
   for (const row of effectiveRows) {
     rowByUserId.set(row.actor.user_id, row);
@@ -92,7 +100,12 @@ async function buildMemberViews(
     };
   });
 
-  return { members, groups: [{ id: myGroup, name: myGroup }] };
+  const groupsWarning =
+    unmatchedGroupEmails.length > 0
+      ? `env/group_master.env 에는 "${myGroup}" 그룹으로 등록되어 있지만, 이 Admin API 키의 조직 구성원 목록(GET /v1/organizations/users)에서는 찾지 못한 이메일이 있습니다: ${unmatchedGroupEmails.join(", ")} — 이메일 표기가 일치하는지, 그 계정이 이 조직에 속해 있는지 확인해주세요.`
+      : undefined;
+
+  return { members, groups: [{ id: myGroup, name: myGroup }], groupsWarning };
 }
 
 /**

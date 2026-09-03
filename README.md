@@ -107,6 +107,7 @@ Anthropic Admin API의 그룹 조회(`GET /v1/organizations/rbac_groups`)는 조
 - `#` 로 시작하는 줄과 빈 줄은 무시됩니다. 이메일만 있고 그룹명이 없는 줄도 무시됩니다. 파일을 수정하면 서버 재시작 없이 다음 조회부터 바로 반영됩니다(파일 수정 시각 기준으로 캐시를 갱신).
 - 이 파일은 사내 인원 구성이 담겨 있으므로 git에 커밋되지 않습니다 (`.gitignore`). 형식만 보여주는 `env/group_master.env.example` 은 커밋되어 있습니다.
 - 파일 경로를 바꾸고 싶으면 `env/.env`에 `GROUP_MASTER_PATH=/절대/경로/group_master.env` 를 추가하세요.
+- **같은 그룹인데 안 보이는 사람이 있다면:** `env/group_master.env` 에는 그 그룹으로 등록돼 있지만 이 Admin API 키가 관리하는 조직의 구성원 목록(`GET /v1/organizations/users`)에서는 찾지 못했다는 뜻일 수 있습니다. 이럴 때는 화면에 어떤 이메일이 빠졌는지 경고로 표시됩니다 — 표시된 이메일과 `env/group_master.env` 의 표기(오타, 다른 도메인 등)가 정확히 같은지, 그 계정이 실제로 이 조직에 속해 있는지 확인해주세요.
 
 ### 그룹 기준 제한 표시의 한계
 
