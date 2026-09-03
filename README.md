@@ -91,41 +91,45 @@ ENV_DIR=/etc/claude-token-manager/env node dist/index.js
 - 조직 구성원 목록은 (Admin API 키별로) 30초 TTL로 캐시됩니다. 유효 스펜드 제한(`/spend_limits/effective`)은 매 요청마다 최신 값을 가져옵니다. `group_master.env` 는 파일이 바뀔 때만 다시 읽습니다.
 - **[개발/테스트 전용]** 화면에 노출되는 인증코드와 입력창에 넣는 Admin API 키는 누구나 화면을 보면 알 수 있으므로, 신뢰할 수 없는 사람이 접근 가능한 환경에서는 절대 이 모드로 배포하지 마세요.
 
-## 소속 그룹은 어디서, 누가 조회되는가 (`env/group_master.env`)
+## 소속 그룹은 어디서, 누가 조회되는가
 
-Anthropic Admin API의 그룹 조회(`GET /v1/organizations/rbac_groups`)는 조직에 따라 권한/스코프 문제로 이 서비스가 쓰는 Admin API 키로는 조회되지 않을 수 있습니다. 그래서 "소속 그룹" 정보는 Anthropic API가 아니라 **로컬 파일 `env/group_master.env`** 에서 가져옵니다.
+"소속 그룹"은 **두 곳을 함께** 봅니다. 둘 중 하나라도 같은 그룹명으로 나오면 로그인한 사람과 같은 그룹으로 취급합니다.
 
-- `env/group_master.env` 파일에 한 줄씩 `이메일, "그룹명"` 형식으로 적어두면 로그인한 사용자의 소속 그룹으로 화면에 표시됩니다.
-- 예시:
-  ```
-  skim@lgacademy.com, "업무지원/재경"
-  sjyang@lgacademy.com, "리더교육센터"
-  ```
-- **로그인한 사람과 같은 그룹명을 가진 사람만 조회됩니다.** 로그인 이메일로 이 파일에서 본인의 그룹을 먼저 찾고, 같은 그룹명이 적힌 다른 이메일만 대시보드에 나타납니다. 예를 들어 위 예시 기준으로 `skim@lgacademy.com` 으로 로그인하면 "업무지원/재경" 그룹 사람들만 보이고, `sjyang@lgacademy.com` 으로 로그인하면 "리더교육센터" 그룹 사람들만 보입니다 — 서로의 그룹은 보이지 않습니다.
-- 로그인한 이메일이 이 파일에 그룹명과 함께 등록되어 있지 않으면, 조회 결과가 빈 목록으로 나오고 그 이유가 화면에 안내됩니다.
+1. **`env/group_master.env`** — 수동으로 관리하는 "이메일 -> 그룹명" 매핑. 이 파일에 매핑이 있으면 이걸 우선 사용합니다.
+2. **Claude Enterprise에 실제 등록된 RBAC 그룹** — `GET /v1/organizations/rbac_groups` + `GET /v1/organizations/rbac_groups/{id}/members` 로 조회. `env/group_master.env` 에 없는 사람도, Claude Enterprise 쪽에 이미 등록된 그룹명이 로그인한 사람의 그룹명과 같으면 함께 조회됩니다.
+
+예시 (`env/group_master.env`):
+```
+skim@lgacademy.com, "업무지원/재경"
+sjyang@lgacademy.com, "리더교육센터"
+```
+이 상태에서 `jyalee@lgacademy.com` 이 파일에는 없지만 Claude Enterprise 콘솔에서 "업무지원/재경" 그룹으로 등록되어 있다면, `skim@lgacademy.com` 으로 로그인했을 때 jyalee도 함께 조회됩니다 (그룹명 문자열이 정확히 같아야 합니다).
+
+- **로그인한 사람과 같은 그룹명을 가진 사람만 조회됩니다.** 로그인 이메일로 본인의 그룹을 먼저 찾고(파일 우선, 없으면 Anthropic 그룹), 같은 그룹명인 다른 사람만 대시보드에 나타납니다. 서로 다른 그룹인 사람들은 서로 보이지 않습니다.
+- 로그인한 사람의 그룹을 파일에서도, Anthropic 쪽에서도 찾을 수 없으면 조회 결과가 빈 목록으로 나오고 그 이유가 화면에 안내됩니다.
 - 이 그룹 제한은 목록 조회뿐 아니라 개인별 제한 설정/해제(PUT·DELETE)에도 적용됩니다. 다른 그룹의 `userId`로 직접 요청해도 서버가 `403`으로 거부합니다.
-- `#` 로 시작하는 줄과 빈 줄은 무시됩니다. 이메일만 있고 그룹명이 없는 줄도 무시됩니다. 파일을 수정하면 서버 재시작 없이 다음 조회부터 바로 반영됩니다(파일 수정 시각 기준으로 캐시를 갱신).
+- Anthropic RBAC 그룹 조회가 이 Admin API 키의 권한/스코프 문제로 실패해도 전체 조회가 막히지는 않습니다 — `env/group_master.env` 매핑만으로 계속 동작하고, 화면에 "Claude Enterprise 그룹 정보를 가져오지 못했습니다 (...)" 경고가 뜹니다.
+- `env/group_master.env` 에서 `#` 로 시작하는 줄과 빈 줄은 무시됩니다. 이메일만 있고 그룹명이 없는 줄도 무시됩니다. 파일을 수정하면 서버 재시작 없이 다음 조회부터 바로 반영됩니다(파일 수정 시각 기준으로 캐시를 갱신).
 - 이 파일은 사내 인원 구성이 담겨 있으므로 git에 커밋되지 않습니다 (`.gitignore`). 형식만 보여주는 `env/group_master.env.example` 은 커밋되어 있습니다.
 - 파일 경로를 바꾸고 싶으면 `env/.env`에 `GROUP_MASTER_PATH=/절대/경로/group_master.env` 를 추가하세요.
-- **같은 그룹인데 안 보이는 사람이 있다면:** `env/group_master.env` 에는 그 그룹으로 등록돼 있지만 이 Admin API 키가 관리하는 조직의 구성원 목록(`GET /v1/organizations/users`)에서는 찾지 못했다는 뜻일 수 있습니다. 이럴 때는 화면에 어떤 이메일이 빠졌는지 경고로 표시됩니다 — 표시된 이메일과 `env/group_master.env` 의 표기(오타, 다른 도메인 등)가 정확히 같은지, 그 계정이 실제로 이 조직에 속해 있는지 확인해주세요.
+- **같은 그룹인데 안 보이는 사람이 있다면:** `env/group_master.env` 에는 그 그룹으로 등록돼 있지만 조직 구성원 목록(`GET /v1/organizations/users`)에서는 찾지 못했다는 뜻일 수 있습니다. 화면에 어떤 이메일이 빠졌는지 경고로 표시됩니다 — 표기(오타, 다른 도메인 등)가 정확히 같은지, 그 계정이 실제로 이 조직에 속해 있는지 확인해주세요. `env/group_master.env` 에도 없고 Claude Enterprise 그룹으로도 확인 안 되는 경우라면, Claude Enterprise 콘솔에서 그 계정의 그룹명이 정말 동일한 문자열(공백/오탈자 없이)로 등록되어 있는지 확인해주세요.
 
 ### 그룹 기준 제한 표시의 한계
 
-`group_master.env` 의 그룹 구분은 Anthropic 쪽 실제 RBAC 그룹과는 무관한, 이 서비스만의 로컬 분류입니다. 반면 "그룹 기준 제한" 열은 Anthropic 의 `GET /v1/organizations/spend_limits/effective` 응답에서 그 멤버의 제한이 실제로 그룹(`rbac_group`)에서 상속되고 있을 때만 값을 알 수 있습니다. 따라서:
-
-- 조직이 Anthropic 쪽에서 그룹 기반 스펜드 제한을 아예 쓰지 않는다면(등급/조직 기본값만 쓰는 경우), 이 열은 항상 "확인 불가"로 표시됩니다 — API 한계가 아니라 애초에 존재하지 않는 값입니다.
-- 어떤 멤버가 Anthropic 그룹에서 상속받고 있는데 그 멤버에게 개인별 override 가 걸려 있으면(effective 값이 override로 가려짐), 같은 `group_master.env` 그룹명을 가진 다른 멤버 중 override 없이 그 Anthropic 그룹을 그대로 상속받고 있는 사람의 effective 값을 근거로 추정합니다. 그런 멤버가 한 명도 없으면 "확인 불가"로 남습니다.
+"그룹 기준 제한" 열은 Anthropic 의 `GET /v1/organizations/spend_limits/effective` 응답에서 그 멤버의 제한이 실제로 그룹(`rbac_group`)에서 상속되고 있을 때만 값을 알 수 있습니다. 조직이 Anthropic 쪽에서 그룹 기반 스펜드 제한을 아예 쓰지 않는다면(등급/조직 기본값만 쓰는 경우), 이 열은 항상 "확인 불가"로 표시됩니다 — API 한계가 아니라 애초에 존재하지 않는 값입니다.
 
 ## API 요약 (내부적으로 호출하는 Anthropic Admin API)
 
 | 용도 | 메서드/경로 |
 | --- | --- |
 | 구성원 목록 | `GET /v1/organizations/users` |
+| RBAC 그룹 목록 | `GET /v1/organizations/rbac_groups` |
+| RBAC 그룹 멤버 목록 | `GET /v1/organizations/rbac_groups/{group_id}/members` |
 | 멤버별 유효 토큰 제한 | `GET /v1/organizations/spend_limits/effective` |
 | 개인별 제한 설정(upsert) | `POST /v1/organizations/spend_limits` |
 | 개인별 제한 해제 | `DELETE /v1/organizations/spend_limits/{spend_limit_id}` |
 
-("소속 그룹"은 위 API가 아니라 로컬 `group_master.env` 파일에서 옵니다.)
+("소속 그룹"은 위 RBAC 그룹 API와 로컬 `env/group_master.env` 파일을 함께 참고합니다. RBAC 그룹 API가 실패해도 `env/group_master.env` 매핑만으로 동작합니다.)
 
 금액은 조직 결제 통화의 **최소 단위(minor unit, 예: 센트) 문자열**로 주고받습니다. 화면에는 이해하기 쉬운 소수(예: `500.00 USD`)로 환산해 보여줍니다.
 

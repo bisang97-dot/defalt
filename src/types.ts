@@ -5,6 +5,17 @@ export interface OrgUser {
   role: string;
 }
 
+export interface RbacGroup {
+  id: string;
+  name: string;
+}
+
+export interface RbacGroupMember {
+  userId: string;
+  email: string;
+  groupId: string;
+}
+
 /**
  * Anthropic Spend Limits API 의 "source" 필드는 open set 이므로
  * 알려진 필드 외 값은 방어적으로 처리한다.
