@@ -3,7 +3,7 @@ import { requireAuth } from "../middleware/auth";
 import { requireAdminApiKey } from "../middleware/adminKey";
 import { getOrgUsers } from "../services/orgDirectory";
 import { deleteSpendLimit, listEffectiveSpendLimits, setUserSpendLimit } from "../services/anthropicAdmin";
-import { getAllGroupAssignments, isGroupMasterMissingOrEmpty } from "../services/groupMaster";
+import { getAllGroupAssignments, getGroupForEmail } from "../services/groupMaster";
 import { errorDetail } from "../utils/errorDetail";
 import type { EffectiveSpendLimitRow, MemberView } from "../types";
 
@@ -11,17 +11,29 @@ export const membersRouter = Router();
 membersRouter.use(requireAuth);
 membersRouter.use(requireAdminApiKey);
 
-async function buildMemberViews(apiKey: string): Promise<{
+async function buildMemberViews(
+  apiKey: string,
+  viewerEmail: string
+): Promise<{
   members: MemberView[];
   groups: { id: string; name: string }[];
   groupsWarning?: string;
 }> {
+  // 소속 그룹은 Anthropic RBAC 그룹 API 대신 group_master.env 의 "이메일 -> 그룹명" 매핑으로 결정한다.
+  // 로그인한 사용자 본인의 그룹을 이 파일에서 먼저 찾고, 같은 그룹명을 가진 사람만 조회 대상으로 삼는다.
+  const myGroup = getGroupForEmail(viewerEmail);
+  if (!myGroup) {
+    return {
+      members: [],
+      groups: [],
+      groupsWarning: `본인 이메일(${viewerEmail})이 env/group_master.env 에 그룹명과 함께 등록되어 있지 않아 조회할 수 있는 구성원이 없습니다.`,
+    };
+  }
+
   const [allUsers, effectiveRows] = await Promise.all([getOrgUsers(apiKey), listEffectiveSpendLimits(apiKey)]);
 
-  // 소속 그룹은 Anthropic RBAC 그룹 API 대신 group_master.env 의 "이메일 -> 그룹명" 매핑으로 결정한다.
-  // 이 파일에 그룹명이 함께 적힌 이메일만 관리 대상으로 삼고, 나머지 조직 구성원은 조회 결과에서 제외한다.
   const groupByEmail = getAllGroupAssignments();
-  const users = allUsers.filter((user) => groupByEmail.has(user.email.toLowerCase()));
+  const users = allUsers.filter((user) => groupByEmail.get(user.email.toLowerCase()) === myGroup);
 
   const rowByUserId = new Map<string, EffectiveSpendLimitRow>();
   for (const row of effectiveRows) {
@@ -80,17 +92,27 @@ async function buildMemberViews(apiKey: string): Promise<{
     };
   });
 
-  const groups = [...new Set(groupByEmail.values())].map((name) => ({ id: name, name }));
-  const groupsWarning = isGroupMasterMissingOrEmpty()
-    ? "env/group_master.env 파일을 찾을 수 없거나 비어 있습니다. 이메일-그룹 매핑을 추가해주세요."
-    : undefined;
+  return { members, groups: [{ id: myGroup, name: myGroup }] };
+}
 
-  return { members, groups, groupsWarning };
+/**
+ * 목록 조회뿐 아니라 실제 제한 변경도 "로그인한 사용자와 같은 그룹" 대상으로만 허용해야
+ * group_master.env 기반 그룹 제한이 실질적인 접근 제어가 된다 (그냥 목록만 가려주는 건 우회가 쉽다).
+ */
+async function isTargetInViewersGroup(apiKey: string, viewerEmail: string, targetUserId: string): Promise<boolean> {
+  const myGroup = getGroupForEmail(viewerEmail);
+  if (!myGroup) return false;
+
+  const users = await getOrgUsers(apiKey);
+  const target = users.find((u) => u.id === targetUserId);
+  if (!target) return false;
+
+  return getAllGroupAssignments().get(target.email.toLowerCase()) === myGroup;
 }
 
 membersRouter.get("/", async (req, res) => {
   try {
-    const result = await buildMemberViews(req.adminApiKey!);
+    const result = await buildMemberViews(req.adminApiKey!, req.user!.email);
     res.json(result);
   } catch (err) {
     console.error("[members] list failed", err);
@@ -113,6 +135,10 @@ membersRouter.put("/:userId/limit", async (req, res) => {
   const amountMinorUnits = Math.round(amount * 100).toString();
 
   try {
+    if (!(await isTargetInViewersGroup(req.adminApiKey!, req.user!.email, userId))) {
+      res.status(403).json({ error: "같은 그룹의 구성원만 관리할 수 있습니다." });
+      return;
+    }
     const result = await setUserSpendLimit(req.adminApiKey!, userId, amountMinorUnits);
     res.json({ ok: true, spendLimit: result });
   } catch (err) {
@@ -122,6 +148,7 @@ membersRouter.put("/:userId/limit", async (req, res) => {
 });
 
 membersRouter.delete("/:userId/limit", async (req, res) => {
+  const { userId } = req.params;
   const spendLimitId = typeof req.body?.spendLimitId === "string" ? req.body.spendLimitId : "";
   if (!spendLimitId.startsWith("spl_")) {
     res.status(400).json({ error: "유효하지 않은 spendLimitId 입니다." });
@@ -129,6 +156,10 @@ membersRouter.delete("/:userId/limit", async (req, res) => {
   }
 
   try {
+    if (!(await isTargetInViewersGroup(req.adminApiKey!, req.user!.email, userId))) {
+      res.status(403).json({ error: "같은 그룹의 구성원만 관리할 수 있습니다." });
+      return;
+    }
     await deleteSpendLimit(req.adminApiKey!, spendLimitId);
     res.json({ ok: true });
   } catch (err) {
