@@ -16,10 +16,12 @@ async function buildMemberViews(apiKey: string): Promise<{
   groups: { id: string; name: string }[];
   groupsWarning?: string;
 }> {
-  const [users, effectiveRows] = await Promise.all([getOrgUsers(apiKey), listEffectiveSpendLimits(apiKey)]);
+  const [allUsers, effectiveRows] = await Promise.all([getOrgUsers(apiKey), listEffectiveSpendLimits(apiKey)]);
 
   // 소속 그룹은 Anthropic RBAC 그룹 API 대신 group_master.env 의 "이메일 -> 그룹명" 매핑으로 결정한다.
+  // 이 파일에 그룹명이 함께 적힌 이메일만 관리 대상으로 삼고, 나머지 조직 구성원은 조회 결과에서 제외한다.
   const groupByEmail = getAllGroupAssignments();
+  const users = allUsers.filter((user) => groupByEmail.has(user.email.toLowerCase()));
 
   const rowByUserId = new Map<string, EffectiveSpendLimitRow>();
   for (const row of effectiveRows) {
@@ -80,7 +82,7 @@ async function buildMemberViews(apiKey: string): Promise<{
 
   const groups = [...new Set(groupByEmail.values())].map((name) => ({ id: name, name }));
   const groupsWarning = isGroupMasterMissingOrEmpty()
-    ? "group_master.env 파일을 찾을 수 없거나 비어 있습니다. 프로젝트 루트에 이메일-그룹 매핑을 추가해주세요."
+    ? "env/group_master.env 파일을 찾을 수 없거나 비어 있습니다. 이메일-그룹 매핑을 추가해주세요."
     : undefined;
 
   return { members, groups, groupsWarning };

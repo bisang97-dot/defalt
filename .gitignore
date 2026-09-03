@@ -1,7 +1,7 @@
 node_modules/
 dist/
-.env
-# 이메일-그룹 매핑 파일. 사내 인원 구성이 담겨 있으므로 커밋하지 않는다 (group_master.env.example 참고).
-group_master.env
+# 민감한 설정 파일은 모두 env/ 폴더에 모아둔다. 실제 값이 든 파일은 커밋하지 않고, *.example 템플릿만 커밋한다.
+env/.env
+env/group_master.env
 *.log
 .DS_Store

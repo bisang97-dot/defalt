@@ -1,22 +1,24 @@
 import fs from "node:fs";
-import path from "node:path";
+import { GROUP_MASTER_DEFAULT_PATH } from "../envPaths";
 
 /**
  * Anthropic Admin API의 RBAC 그룹 조회(`/v1/organizations/rbac_groups`)가 이 서비스가 쓰는
  * Admin API 키로는 동작하지 않는 조직(권한/스코프/그룹 기능 미사용 등)을 위해,
  * "로그인 이메일 -> 소속 그룹명" 매핑을 로컬 파일에서 직접 관리하는 방식으로 대체한다.
  *
- * 파일 형식 (기본 경로: 프로젝트 루트의 group_master.env, GROUP_MASTER_PATH 환경변수로 변경 가능):
+ * 파일 형식 (기본 경로: env/group_master.env, GROUP_MASTER_PATH 환경변수로 변경 가능):
  *   이메일, "그룹명"
  * 예)
  *   skim@lgacademy.com, "업무지원/재경"
  *   sjyang@lgacademy.com, "리더교육센터"
  *
- * `#` 로 시작하는 줄과 빈 줄은 무시한다. 파일이 수정되면(mtime 변경 시) 다음 조회에서 자동 반영된다.
+ * `#` 로 시작하는 줄과 빈 줄은 무시한다. 이메일만 있고 그룹명이 없는 줄도 무시한다
+ * (같은 줄에 유효한 그룹명이 함께 적힌 이메일만 매핑에 포함되고, 그 결과 대시보드에도 그 대상자만 표시된다).
+ * 파일이 수정되면(mtime 변경 시) 다음 조회에서 자동 반영된다.
  */
 
 function resolvePath(): string {
-  return process.env.GROUP_MASTER_PATH ?? path.join(process.cwd(), "group_master.env");
+  return process.env.GROUP_MASTER_PATH ?? GROUP_MASTER_DEFAULT_PATH;
 }
 
 function parseLine(rawLine: string): [email: string, group: string] | null {

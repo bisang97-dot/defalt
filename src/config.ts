@@ -1,10 +1,14 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import { DOTENV_PATH } from "./envPaths";
+
+// .env 파일은 프로젝트 루트가 아니라 env/ 폴더 아래에 둔다 (직접 접근을 막기 위해 그 폴더만 권한을 잠글 수 있게).
+dotenv.config({ path: DOTENV_PATH });
 
 function required(name: string): string {
   const value = process.env[name];
   if (!value || value.trim() === "") {
     throw new Error(
-      `환경변수 ${name} 가 설정되지 않았습니다. .env 파일을 확인하세요 (.env.example 참고).`
+      `환경변수 ${name} 가 설정되지 않았습니다. ${DOTENV_PATH} 파일을 확인하세요 (env/.env.example 참고).`
     );
   }
   return value;
