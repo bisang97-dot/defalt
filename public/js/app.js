@@ -47,7 +47,8 @@ async function api(path, options = {}) {
   const data = contentType.includes("application/json") ? await res.json() : null;
   if (!res.ok) {
     const message = data?.error ?? `요청이 실패했습니다 (${res.status})`;
-    throw new Error(message);
+    // [개발/테스트 전용] 서버가 내려주는 실제 원인(detail)을 함께 보여준다.
+    throw new Error(data?.detail ? `${message} — ${data.detail}` : message);
   }
   return data;
 }
@@ -259,9 +260,15 @@ function buildRow(member) {
 
 async function loadMembers() {
   try {
-    const { members } = await api("/api/members");
+    const { members, groupsWarning } = await api("/api/members");
     const tbody = el("members-tbody");
     tbody.replaceChildren(...members.map(buildRow));
+    if (groupsWarning) {
+      // 그룹 정보만 못 가져온 경우: 나머지(이름/이메일/개인별 제한)는 정상 표시하고 경고만 알린다.
+      showBanner(`그룹 정보를 불러오지 못했습니다 — ${groupsWarning}`, "error");
+    } else {
+      clearBanner();
+    }
   } catch (err) {
     showBanner(err.message, "error");
   }

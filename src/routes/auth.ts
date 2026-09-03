@@ -6,6 +6,7 @@ import { issueOtp, verifyOtp } from "../services/otpStore";
 import { findOrgUserByEmail } from "../services/orgDirectory";
 import { requireAuth, setSessionCookie, signSession, clearSessionCookie } from "../middleware/auth";
 import { requireAdminApiKey } from "../middleware/adminKey";
+import { errorDetail } from "../utils/errorDetail";
 
 export const authRouter = Router();
 
@@ -59,7 +60,10 @@ authRouter.post("/request-code", requestCodeLimiter, requireAdminApiKey, async (
     res.json({ message: GENERIC_SENT_MESSAGE, devCode });
   } catch (err) {
     console.error("[auth] request-code failed", err);
-    res.status(502).json({ error: "조직 정보를 확인하는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요." });
+    res.status(502).json({
+      error: "조직 정보를 확인하는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+      detail: errorDetail(err),
+    });
   }
 });
 
@@ -97,7 +101,7 @@ authRouter.post("/verify-code", verifyCodeLimiter, requireAdminApiKey, async (re
     res.json({ user: { id: orgUser.id, email: orgUser.email, name: orgUser.name, role: orgUser.role } });
   } catch (err) {
     console.error("[auth] verify-code failed", err);
-    res.status(502).json({ error: "조직 정보를 확인하는 중 오류가 발생했습니다." });
+    res.status(502).json({ error: "조직 정보를 확인하는 중 오류가 발생했습니다.", detail: errorDetail(err) });
   }
 });
 

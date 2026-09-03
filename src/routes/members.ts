@@ -3,6 +3,7 @@ import { requireAuth } from "../middleware/auth";
 import { requireAdminApiKey } from "../middleware/adminKey";
 import { getOrgGroups, getGroupMembership, getOrgUsers } from "../services/orgDirectory";
 import { deleteSpendLimit, listEffectiveSpendLimits, setUserSpendLimit } from "../services/anthropicAdmin";
+import { errorDetail } from "../utils/errorDetail";
 import type { EffectiveSpendLimitRow, MemberView, SpendLimitSource } from "../types";
 
 export const membersRouter = Router();
@@ -15,15 +16,27 @@ function resolveSourceGroupId(source: SpendLimitSource, singleGroupFallback: str
   return singleGroupFallback;
 }
 
-async function buildMemberViews(
-  apiKey: string
-): Promise<{ members: MemberView[]; groups: { id: string; name: string }[] }> {
-  const [users, groups, groupMembership, effectiveRows] = await Promise.all([
-    getOrgUsers(apiKey),
-    getOrgGroups(apiKey),
-    getGroupMembership(apiKey),
-    listEffectiveSpendLimits(apiKey),
-  ]);
+async function buildMemberViews(apiKey: string): Promise<{
+  members: MemberView[];
+  groups: { id: string; name: string }[];
+  groupsWarning?: string;
+}> {
+  // 이름/이메일/개인별 제한 조회는 이 서비스의 핵심 기능이므로 실패 시 그대로 오류를 던진다.
+  const [users, effectiveRows] = await Promise.all([getOrgUsers(apiKey), listEffectiveSpendLimits(apiKey)]);
+
+  // RBAC 그룹 조회는 조직에 그룹이 없거나, 이 Admin API 키에 그룹 조회 권한이 없는 경우 실패할 수 있다.
+  // 그룹 정보가 없어도 이름/이메일/개인별 제한은 보여줄 수 있으므로, 실패해도 전체 요청을 막지 않는다.
+  let groups: { id: string; name: string }[] = [];
+  let groupMembership = new Map<string, string[]>();
+  let groupsWarning: string | undefined;
+  try {
+    groups = await getOrgGroups(apiKey);
+    groupMembership = await getGroupMembership(apiKey);
+  } catch (err) {
+    console.error("[members] group info unavailable, continuing without it", err);
+    groupsWarning =
+      errorDetail(err) ?? "그룹 정보를 불러오지 못했습니다. Admin API 키의 그룹 조회 권한/스코프를 확인해주세요.";
+  }
 
   const groupNameById = new Map(groups.map((g) => [g.id, g.name] as const));
 
@@ -98,7 +111,7 @@ async function buildMemberViews(
     };
   });
 
-  return { members, groups: groups.map((g) => ({ id: g.id, name: g.name })) };
+  return { members, groups: groups.map((g) => ({ id: g.id, name: g.name })), groupsWarning };
 }
 
 membersRouter.get("/", async (req, res) => {
@@ -107,7 +120,10 @@ membersRouter.get("/", async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("[members] list failed", err);
-    res.status(502).json({ error: "구성원 정보를 불러오는 중 오류가 발생했습니다." });
+    res.status(502).json({
+      error: "구성원 정보를 불러오는 중 오류가 발생했습니다.",
+      detail: errorDetail(err),
+    });
   }
 });
 
@@ -127,7 +143,7 @@ membersRouter.put("/:userId/limit", async (req, res) => {
     res.json({ ok: true, spendLimit: result });
   } catch (err) {
     console.error("[members] set limit failed", err);
-    res.status(502).json({ error: "개인별 토큰 제한 설정에 실패했습니다." });
+    res.status(502).json({ error: "개인별 토큰 제한 설정에 실패했습니다.", detail: errorDetail(err) });
   }
 });
 
@@ -143,6 +159,6 @@ membersRouter.delete("/:userId/limit", async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error("[members] delete limit override failed", err);
-    res.status(502).json({ error: "개인별 토큰 제한 해제에 실패했습니다." });
+    res.status(502).json({ error: "개인별 토큰 제한 해제에 실패했습니다.", detail: errorDetail(err) });
   }
 });
