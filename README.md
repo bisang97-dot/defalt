@@ -1,0 +1,87 @@
+# Claude Enterprise 토큰 관리 에이전트
+
+Claude Enterprise 조직의 구성원 목록과 그룹별/개인별 토큰(스펜드) 제한을 조회하고,
+개인별 제한을 설정/해제하는 내부 관리용 웹 서비스입니다.
+
+## 주요 기능
+
+1. **조직 구성원 조회** — 이름, 이메일, 소속 그룹, 그룹 기준 토큰 제한, 개인별 토큰 제한(및 그 출처)을 한 화면에서 확인
+2. **개인별 토큰 제한 적용** — Claude Admin API(`POST /v1/organizations/spend_limits`)를 호출해 특정 구성원에게 개인별 한도를 설정하거나(`DELETE`) 해제
+3. **API 키 분리 관리** — Admin API 키는 소스코드에 포함되지 않고 `.env` 파일(런타임 환경변수)로만 주입
+4. **이메일 기반 1회용 인증코드 로그인** — 비밀번호 없이, 이메일 입력 → 조직 구성원 여부 확인 → 6자리 인증코드 이메일 발송 → 코드 검증 방식으로 로그인. 이 조직에 소속되지 않은 이메일로는 로그인할 수 없습니다.
+
+## 사전 준비물 (Anthropic 측)
+
+- **Claude Enterprise** 플랜의 조직이어야 합니다 (Claude Console/Platform 조직은 Spend Limits API를 지원하지 않습니다).
+- 조직의 **사용 크레딧(usage credits)** 이 활성화되어 있어야 합니다 (claude.ai 결제 설정에서 Primary Owner가 활성화).
+- **Admin API 키** (`sk-ant-admin...`) 를 발급받아야 하며, 반드시 다음 스코프를 포함해야 합니다:
+  - `read:spend_limits` (조회)
+  - `write:spend_limits` (설정/해제)
+
+발급 방법: Claude Console → Organization Settings → Admin API Keys.
+
+## 설치 및 실행
+
+```bash
+npm install
+cp .env.example .env
+# .env 파일을 열어 CLAUDE_ADMIN_API_KEY, SESSION_SECRET, SMTP_* 값을 채워주세요.
+
+npm run dev     # 개발 모드 (자동 재시작)
+# 또는
+npm run build && npm start   # 프로덕션 빌드 후 실행
+```
+
+서버는 기본적으로 `http://localhost:3000` 에서 서비스됩니다 (`.env`의 `PORT`로 변경 가능).
+
+## 환경변수 (`.env`)
+
+`.env.example` 파일을 참고하세요. 절대 `.env` 파일을 git에 커밋하지 마세요 (`.gitignore`에 이미 등록되어 있습니다).
+
+| 변수 | 설명 |
+| --- | --- |
+| `SESSION_SECRET` | 로그인 세션(JWT) 서명용 비밀키. `openssl rand -hex 32` 등으로 생성한 무작위 값을 사용하세요. |
+| `CLAUDE_ADMIN_API_KEY` | Claude Enterprise Admin API 키 (`read:spend_limits`, `write:spend_limits` 스코프 필요). |
+| `OTP_*` | 인증코드 길이/유효시간/최대 시도 횟수/재전송 쿨다운 설정. |
+| `SMTP_*` | 인증코드 발송용 SMTP 서버 정보. |
+
+## 로그인 흐름
+
+1. 사용자가 자신의 이메일을 입력합니다.
+2. 서버는 Admin API로 조직 구성원 목록(`GET /v1/organizations/users`)을 조회해, 입력한 이메일이 실제로 이 조직의 구성원인지 확인합니다.
+3. 구성원이 맞으면 6자리 인증코드를 생성해 메모리에 저장(해시)하고 SMTP로 이메일을 발송합니다. **조직 구성원이 아닌 이메일에는 코드를 발송하지 않지만, 이메일 존재 여부를 외부에 노출하지 않기 위해 응답 메시지는 항상 동일합니다.**
+4. 사용자가 인증코드를 입력하면 서버가 검증 후, httpOnly + `SameSite=Strict` 쿠키에 서명된 세션(JWT)을 발급합니다.
+5. 이후 모든 `/api/members/*` 요청은 이 세션 쿠키가 있어야 접근할 수 있습니다.
+
+### 알아둘 점 (내부 도구로서의 트레이드오프)
+
+- 인증코드는 **단일 프로세스 메모리**에 저장됩니다. 서버를 재시작하면 발급된 코드가 모두 무효화됩니다. 여러 인스턴스로 스케일 아웃하려면 Redis 등 공유 저장소로 교체해야 합니다.
+- 이메일 발송 성공/실패와 무관하게 API 응답 메시지는 동일하게 유지되어 사용자 열거(enumeration) 공격을 방어하지만, 실제 발송 시도 여부(재전송 쿨다운 등)까지 완전히 감추지는 않습니다. 순수 내부망 배포를 전제로 한 실용적 타협입니다.
+- 조직 구성원/그룹 목록은 30초 TTL로 캐시됩니다. 유효 스펜드 제한(`/spend_limits/effective`)은 매 요청마다 최신 값을 가져옵니다.
+
+## 그룹 기준 제한 표시의 한계
+
+Claude Admin API의 `GET /v1/organizations/spend_limits/effective` 는 **현재 적용 중인(effective)** 제한만 알려줍니다.
+어떤 멤버에게 개인별 override가 설정되어 있으면, 그 멤버가 override가 없었을 때 그룹에서 상속받았을 금액은 API가 직접 알려주지 않습니다.
+
+이 서비스는 같은 그룹의 다른 멤버 중 override가 없는 사람의 effective 값을 근거로 그룹 기준액을 추정합니다.
+그룹의 **모든** 멤버가 개인별 override를 갖고 있는 경우에는 그룹 기준액을 알 수 없어 화면에 "확인 불가"로 표시됩니다. 이는 Anthropic API 자체의 한계이며, 이를 우회하려면(override를 임시로 지웠다가 값을 확인 후 복원) 실제 한도가 일시적으로 풀리는 부작용이 있어 이 도구는 그런 방식을 사용하지 않습니다.
+
+## API 요약 (내부적으로 호출하는 Anthropic Admin API)
+
+| 용도 | 메서드/경로 |
+| --- | --- |
+| 구성원 목록 | `GET /v1/organizations/users` |
+| 그룹 목록 | `GET /v1/organizations/rbac_groups` |
+| 그룹 멤버 목록 | `GET /v1/organizations/rbac_groups/{group_id}/members` |
+| 멤버별 유효 토큰 제한 | `GET /v1/organizations/spend_limits/effective` |
+| 개인별 제한 설정(upsert) | `POST /v1/organizations/spend_limits` |
+| 개인별 제한 해제 | `DELETE /v1/organizations/spend_limits/{spend_limit_id}` |
+
+금액은 조직 결제 통화의 **최소 단위(minor unit, 예: 센트) 문자열**로 주고받습니다. 화면에는 이해하기 쉬운 소수(예: `500.00 USD`)로 환산해 보여줍니다.
+
+## 배포 시 주의사항
+
+- `.env` 파일은 배포 서버에서만 생성하고, 소스 저장소에는 절대 포함하지 마세요.
+- 사내 전용으로 운영할 경우에도 HTTPS 뒤에서 서비스하는 것을 권장합니다 (`NODE_ENV=production`으로 설정하면 세션 쿠키에 `Secure` 속성이 붙습니다).
+- Admin API 키는 조직 전체의 스펜드 제한을 변경할 수 있는 매우 민감한 자격 증명입니다. 이 서비스가 실행되는 서버 접근 권한을 최소한으로 유지하세요.
