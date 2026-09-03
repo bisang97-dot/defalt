@@ -27,10 +27,20 @@ function clearBanner() {
   el("banner").classList.add("hidden");
 }
 
+// [개발/테스트 전용] Admin API 키는 이 입력창의 값을 매 요청 헤더로만 전달하고,
+// 브라우저 저장소(localStorage/sessionStorage)나 서버에는 어디에도 저장하지 않는다.
+function getAdminApiKey() {
+  return el("input-admin-key").value.trim();
+}
+
 async function api(path, options = {}) {
+  const headers = { "content-type": "application/json" };
+  const adminKey = getAdminApiKey();
+  if (adminKey) headers["x-admin-api-key"] = adminKey;
+
   const res = await fetch(path, {
     method: options.method ?? "GET",
-    headers: { "content-type": "application/json" },
+    headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const contentType = res.headers.get("content-type") ?? "";
@@ -59,15 +69,28 @@ async function init() {
   }
 }
 
+// [개발/테스트 전용] 서버가 이메일 발송 대신 응답에 담아 보내주는 인증코드를 화면에 그대로 노출한다.
+function showDevCode(devCode) {
+  const box = el("dev-code-box");
+  if (devCode) {
+    box.textContent = `[개발/테스트용] 인증코드: ${devCode}`;
+    box.classList.remove("hidden");
+  } else {
+    box.classList.add("hidden");
+    box.textContent = "";
+  }
+}
+
 el("form-email").addEventListener("submit", async (e) => {
   e.preventDefault();
   clearBanner();
   const email = el("input-email").value.trim();
   try {
-    const { message } = await api("/api/auth/request-code", { method: "POST", body: { email } });
+    const { message, devCode } = await api("/api/auth/request-code", { method: "POST", body: { email } });
     pendingEmail = email;
     el("otp-email").textContent = email;
     showBanner(message, "success");
+    showDevCode(devCode);
     showView("otp");
   } catch (err) {
     showBanner(err.message, "error");
@@ -95,11 +118,12 @@ el("form-otp").addEventListener("submit", async (e) => {
 el("btn-resend").addEventListener("click", async () => {
   clearBanner();
   try {
-    const { message } = await api("/api/auth/request-code", {
+    const { message, devCode } = await api("/api/auth/request-code", {
       method: "POST",
       body: { email: pendingEmail },
     });
     showBanner(message, "success");
+    showDevCode(devCode);
   } catch (err) {
     showBanner(err.message, "error");
   }
@@ -107,6 +131,7 @@ el("btn-resend").addEventListener("click", async () => {
 
 el("btn-back-email").addEventListener("click", () => {
   clearBanner();
+  showDevCode(null);
   showView("email");
 });
 

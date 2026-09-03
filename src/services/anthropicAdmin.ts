@@ -19,7 +19,15 @@ export class AnthropicAdminApiError extends Error {
   }
 }
 
+/**
+ * [개발/테스트 전용 모드]
+ * 운영 환경에서는 Admin API 키를 서버 환경변수(config.anthropicAdminApiKey)로만 관리해야 한다.
+ * 지금은 API 키를 .env/서버에 저장하지 않고, 매 요청마다 화면 입력창에서 받은 값을
+ * 호출부(라우트)가 apiKey 파라미터로 그대로 전달해서 쓰는 방식으로 임시 전환했다.
+ * 운영 전환 시: 아래 모든 함수의 apiKey 파라미터를 제거하고 config.anthropicAdminApiKey를 사용하도록 되돌린다.
+ */
 async function adminRequest<T>(
+  apiKey: string,
   method: "GET" | "POST" | "DELETE",
   path: string,
   options: { query?: Record<string, string | string[] | undefined>; body?: unknown } = {}
@@ -39,7 +47,7 @@ async function adminRequest<T>(
   const res = await fetch(url, {
     method,
     headers: {
-      "x-api-key": config.anthropicAdminApiKey,
+      "x-api-key": apiKey,
       "anthropic-version": config.anthropicVersion,
       ...(options.body ? { "content-type": "application/json" } : {}),
     },
@@ -67,6 +75,7 @@ async function adminRequest<T>(
  * 두 방식을 모두 지원하도록 방어적으로 처리한다.
  */
 async function paginateAll<TRow>(
+  apiKey: string,
   path: string,
   baseQuery: Record<string, string | string[] | undefined>,
   dataKey = "data"
@@ -83,7 +92,7 @@ async function paginateAll<TRow>(
       ...(afterId ? { after_id: afterId } : {}),
     };
 
-    const response = await adminRequest<Record<string, unknown>>("GET", path, { query });
+    const response = await adminRequest<Record<string, unknown>>(apiKey, "GET", path, { query });
     const data = (response[dataKey] as TRow[] | undefined) ?? [];
     rows.push(...data);
 
@@ -114,8 +123,8 @@ interface RawOrgUser {
   role: string;
 }
 
-export async function listOrgUsers(): Promise<OrgUser[]> {
-  const raw = await paginateAll<RawOrgUser>("/v1/organizations/users", { limit: "100" });
+export async function listOrgUsers(apiKey: string): Promise<OrgUser[]> {
+  const raw = await paginateAll<RawOrgUser>(apiKey, "/v1/organizations/users", { limit: "100" });
   return raw.map((u) => ({ id: u.id, email: u.email, name: u.name ?? null, role: u.role }));
 }
 
@@ -124,8 +133,8 @@ interface RawRbacGroup {
   name: string;
 }
 
-export async function listRbacGroups(): Promise<RbacGroup[]> {
-  const raw = await paginateAll<RawRbacGroup>("/v1/organizations/rbac_groups", { limit: "100" });
+export async function listRbacGroups(apiKey: string): Promise<RbacGroup[]> {
+  const raw = await paginateAll<RawRbacGroup>(apiKey, "/v1/organizations/rbac_groups", { limit: "100" });
   return raw.map((g) => ({ id: g.id, name: g.name }));
 }
 
@@ -135,16 +144,17 @@ interface RawRbacGroupMember {
   group_id: string;
 }
 
-export async function listRbacGroupMembers(groupId: string): Promise<RbacGroupMember[]> {
+export async function listRbacGroupMembers(apiKey: string, groupId: string): Promise<RbacGroupMember[]> {
   const raw = await paginateAll<RawRbacGroupMember>(
+    apiKey,
     `/v1/organizations/rbac_groups/${encodeURIComponent(groupId)}/members`,
     { limit: "100" }
   );
   return raw.map((m) => ({ userId: m.user_id, email: m.email, groupId: m.group_id ?? groupId }));
 }
 
-export async function listEffectiveSpendLimits(): Promise<EffectiveSpendLimitRow[]> {
-  return paginateAll<EffectiveSpendLimitRow>("/v1/organizations/spend_limits/effective", {
+export async function listEffectiveSpendLimits(apiKey: string): Promise<EffectiveSpendLimitRow[]> {
+  return paginateAll<EffectiveSpendLimitRow>(apiKey, "/v1/organizations/spend_limits/effective", {
     limit: "100",
   });
 }
@@ -153,11 +163,12 @@ export async function listEffectiveSpendLimits(): Promise<EffectiveSpendLimitRow
  * 개인별(override) 토큰 사용 한도를 설정한다. amount 는 조직 결제 통화의 최소 단위(minor unit, 예: 센트) 문자열이어야 한다.
  */
 export async function setUserSpendLimit(
+  apiKey: string,
   userId: string,
   amountMinorUnits: string,
   period: "monthly" = "monthly"
 ): Promise<{ id: string; amount: string | null; period: string }> {
-  return adminRequest("POST", "/v1/organizations/spend_limits", {
+  return adminRequest(apiKey, "POST", "/v1/organizations/spend_limits", {
     body: {
       scope: { type: "user", user_id: userId },
       amount: amountMinorUnits,
@@ -166,6 +177,10 @@ export async function setUserSpendLimit(
   });
 }
 
-export async function deleteSpendLimit(spendLimitId: string): Promise<void> {
-  await adminRequest<unknown>("DELETE", `/v1/organizations/spend_limits/${encodeURIComponent(spendLimitId)}`);
+export async function deleteSpendLimit(apiKey: string, spendLimitId: string): Promise<void> {
+  await adminRequest<unknown>(
+    apiKey,
+    "DELETE",
+    `/v1/organizations/spend_limits/${encodeURIComponent(spendLimitId)}`
+  );
 }

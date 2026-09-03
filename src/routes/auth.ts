@@ -1,9 +1,11 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { issueOtp, verifyOtp } from "../services/otpStore";
-import { sendOtpEmail } from "../services/mailer";
+// [개발/테스트 전용 모드] 이메일 발송 대신 화면에 인증코드를 노출한다. 운영 전환 시 아래 import와 sendOtpEmail 호출을 복원한다.
+// import { sendOtpEmail } from "../services/mailer";
 import { findOrgUserByEmail } from "../services/orgDirectory";
 import { requireAuth, setSessionCookie, signSession, clearSessionCookie } from "../middleware/auth";
+import { requireAdminApiKey } from "../middleware/adminKey";
 
 export const authRouter = Router();
 
@@ -30,10 +32,13 @@ const GENERIC_SENT_MESSAGE =
 
 /**
  * 이메일을 입력받아, 그 이메일이 이 서비스가 관리하는 Claude Enterprise 조직의
- * 구성원인 경우에만 실제로 6자리 인증코드를 발송한다.
+ * 구성원인 경우에만 실제로 6자리 인증코드를 발급한다.
  * 조직 미소속 이메일 여부를 외부에 노출하지 않기 위해 응답 메시지는 항상 동일하게 유지한다.
+ *
+ * [개발/테스트 전용 모드] 이메일 발송 기능은 잠시 비활성화하고, 발급된 코드를 응답(devCode)에 그대로 담아
+ * 화면에 노출한다. 운영 전환 시 devCode 필드와 아래 주석 처리한 sendOtpEmail 호출을 되돌려야 한다.
  */
-authRouter.post("/request-code", requestCodeLimiter, async (req, res) => {
+authRouter.post("/request-code", requestCodeLimiter, requireAdminApiKey, async (req, res) => {
   const email = typeof req.body?.email === "string" ? req.body.email.trim() : "";
   if (!EMAIL_RE.test(email)) {
     res.status(400).json({ error: "올바른 이메일 형식이 아닙니다." });
@@ -41,22 +46,24 @@ authRouter.post("/request-code", requestCodeLimiter, async (req, res) => {
   }
 
   try {
-    const orgUser = await findOrgUserByEmail(email);
+    const orgUser = await findOrgUserByEmail(req.adminApiKey!, email);
+    let devCode: string | undefined;
     if (orgUser) {
       const issued = issueOtp(email);
       if (issued) {
-        await sendOtpEmail(email, issued.code);
+        // await sendOtpEmail(email, issued.code);
+        devCode = issued.code;
       }
       // 쿨다운 중이어도(issued === null) 외부에는 동일한 성공 메시지를 반환한다.
     }
-    res.json({ message: GENERIC_SENT_MESSAGE });
+    res.json({ message: GENERIC_SENT_MESSAGE, devCode });
   } catch (err) {
     console.error("[auth] request-code failed", err);
     res.status(502).json({ error: "조직 정보를 확인하는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요." });
   }
 });
 
-authRouter.post("/verify-code", verifyCodeLimiter, async (req, res) => {
+authRouter.post("/verify-code", verifyCodeLimiter, requireAdminApiKey, async (req, res) => {
   const email = typeof req.body?.email === "string" ? req.body.email.trim() : "";
   const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
 
@@ -79,7 +86,7 @@ authRouter.post("/verify-code", verifyCodeLimiter, async (req, res) => {
 
   try {
     // OTP 발급 시점 이후 조직에서 제외되었을 가능성에 대비해 재확인한다.
-    const orgUser = await findOrgUserByEmail(email);
+    const orgUser = await findOrgUserByEmail(req.adminApiKey!, email);
     if (!orgUser) {
       res.status(403).json({ error: "더 이상 조직 구성원이 아닙니다." });
       return;

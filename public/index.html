@@ -15,6 +15,13 @@
     </div>
   </header>
 
+  <!-- [개발/테스트 전용] Admin API 키는 서버에 저장되지 않습니다. 이 입력창의 값은 매 요청마다 헤더로만 전달되고,
+       브라우저 저장소에도 기록되지 않으므로 새로고침하면 다시 입력해야 합니다. -->
+  <div class="admin-key-bar">
+    <label for="input-admin-key">Admin API 키 <span class="muted">(서버/브라우저에 저장되지 않음, 새로고침 시 재입력 필요)</span></label>
+    <input id="input-admin-key" type="password" placeholder="sk-ant-admin-..." autocomplete="off" />
+  </div>
+
   <main class="container">
     <div id="banner" class="banner hidden"></div>
 
@@ -32,7 +39,8 @@
     <!-- 2단계: 인증코드 입력 -->
     <section id="view-otp" class="card hidden">
       <h2>인증코드 확인</h2>
-      <p class="muted"><span id="otp-email"></span> 로 발송된 6자리 인증코드를 입력하세요.</p>
+      <p class="muted"><span id="otp-email"></span> 로 발송될 6자리 인증코드를 입력하세요.</p>
+      <div id="dev-code-box" class="dev-code-box hidden"></div>
       <form id="form-otp">
         <label for="input-code">인증코드</label>
         <input id="input-code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" required placeholder="000000" autocomplete="one-time-code" />

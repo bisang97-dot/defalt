@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
+import { requireAdminApiKey } from "../middleware/adminKey";
 import { getOrgGroups, getGroupMembership, getOrgUsers } from "../services/orgDirectory";
 import { deleteSpendLimit, listEffectiveSpendLimits, setUserSpendLimit } from "../services/anthropicAdmin";
 import type { EffectiveSpendLimitRow, MemberView, SpendLimitSource } from "../types";
 
 export const membersRouter = Router();
 membersRouter.use(requireAuth);
+membersRouter.use(requireAdminApiKey);
 
 function resolveSourceGroupId(source: SpendLimitSource, singleGroupFallback: string | null): string | null {
   if (typeof source.rbac_group_id === "string") return source.rbac_group_id;
@@ -13,12 +15,14 @@ function resolveSourceGroupId(source: SpendLimitSource, singleGroupFallback: str
   return singleGroupFallback;
 }
 
-async function buildMemberViews(): Promise<{ members: MemberView[]; groups: { id: string; name: string }[] }> {
+async function buildMemberViews(
+  apiKey: string
+): Promise<{ members: MemberView[]; groups: { id: string; name: string }[] }> {
   const [users, groups, groupMembership, effectiveRows] = await Promise.all([
-    getOrgUsers(),
-    getOrgGroups(),
-    getGroupMembership(),
-    listEffectiveSpendLimits(),
+    getOrgUsers(apiKey),
+    getOrgGroups(apiKey),
+    getGroupMembership(apiKey),
+    listEffectiveSpendLimits(apiKey),
   ]);
 
   const groupNameById = new Map(groups.map((g) => [g.id, g.name] as const));
@@ -97,9 +101,9 @@ async function buildMemberViews(): Promise<{ members: MemberView[]; groups: { id
   return { members, groups: groups.map((g) => ({ id: g.id, name: g.name })) };
 }
 
-membersRouter.get("/", async (_req, res) => {
+membersRouter.get("/", async (req, res) => {
   try {
-    const result = await buildMemberViews();
+    const result = await buildMemberViews(req.adminApiKey!);
     res.json(result);
   } catch (err) {
     console.error("[members] list failed", err);
@@ -119,7 +123,7 @@ membersRouter.put("/:userId/limit", async (req, res) => {
   const amountMinorUnits = Math.round(amount * 100).toString();
 
   try {
-    const result = await setUserSpendLimit(userId, amountMinorUnits);
+    const result = await setUserSpendLimit(req.adminApiKey!, userId, amountMinorUnits);
     res.json({ ok: true, spendLimit: result });
   } catch (err) {
     console.error("[members] set limit failed", err);
@@ -135,7 +139,7 @@ membersRouter.delete("/:userId/limit", async (req, res) => {
   }
 
   try {
-    await deleteSpendLimit(spendLimitId);
+    await deleteSpendLimit(req.adminApiKey!, spendLimitId);
     res.json({ ok: true });
   } catch (err) {
     console.error("[members] delete limit override failed", err);

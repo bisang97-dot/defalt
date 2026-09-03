@@ -25,7 +25,8 @@ export const config = {
   sessionSecret: required("SESSION_SECRET"),
   sessionTtlHours: optionalInt("SESSION_TTL_HOURS", 12),
 
-  anthropicAdminApiKey: required("CLAUDE_ADMIN_API_KEY"),
+  // [개발/테스트 전용 모드] Admin API 키는 더 이상 .env에서 읽지 않고 화면 입력창(요청 헤더)에서 받는다.
+  // 운영 전환 시: required("CLAUDE_ADMIN_API_KEY") 로 되돌리고 서비스 전역에서 이 값을 사용한다.
   anthropicVersion: process.env.ANTHROPIC_VERSION ?? "2023-06-01",
 
   otp: {
@@ -35,8 +36,10 @@ export const config = {
     resendCooldownSeconds: optionalInt("OTP_RESEND_COOLDOWN_SECONDS", 30),
   },
 
+  // [개발/테스트 전용 모드] 이메일 발송을 사용하지 않으므로 SMTP 설정은 필수가 아니다.
+  // 운영 전환 시: host/user/pass 를 다시 required(...) 로 되돌린다.
   smtp: {
-    host: required("SMTP_HOST"),
+    host: process.env.SMTP_HOST ?? "",
     port: optionalInt("SMTP_PORT", 587),
     secure: process.env.SMTP_SECURE === "true",
     user: process.env.SMTP_USER ?? "",
