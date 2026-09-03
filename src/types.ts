@@ -45,6 +45,19 @@ export interface EffectiveSpendLimitRow {
   period_to_date_spend: string;
 }
 
+export interface GroupAverageAlert {
+  groupName: string;
+  currency: string;
+  averageMajorUnits: number;
+  thresholdMajorUnits: number;
+  recipients: string[];
+  members: {
+    email: string;
+    name: string | null;
+    effectiveAmountMajorUnits: number | null;
+  }[];
+}
+
 export interface MemberView {
   userId: string;
   email: string;

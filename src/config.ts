@@ -21,6 +21,20 @@ function optionalInt(name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function optionalFloat(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const n = Number.parseFloat(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function emailList(name: string): string[] {
+  return (process.env[name] ?? "")
+    .split(",")
+    .map((email) => email.trim())
+    .filter((email) => email.length > 0);
+}
+
 export const config = {
   port: optionalInt("PORT", 3000),
   nodeEnv: process.env.NODE_ENV ?? "development",
@@ -39,6 +53,11 @@ export const config = {
     maxAttempts: optionalInt("OTP_MAX_ATTEMPTS", 5),
     resendCooldownSeconds: optionalInt("OTP_RESEND_COOLDOWN_SECONDS", 30),
   },
+
+  // 개인별 제한을 저장할 때, 그 그룹의 평균 토큰 제한이 이 금액(USD)을 초과하면 확인창을 띄우고,
+  // "예"를 누르면 아래 관리자들에게 그룹 현황을 알린다 (현재는 이메일 대신 화면 알림창으로 대체).
+  groupAvgLimitAlertThresholdUsd: optionalFloat("GROUP_AVG_LIMIT_ALERT_THRESHOLD_USD", 100),
+  adminNotifyEmails: emailList("ADMIN_NOTIFY_EMAILS"),
 
   // [개발/테스트 전용 모드] 이메일 발송을 사용하지 않으므로 SMTP 설정은 필수가 아니다.
   // 운영 전환 시: host/user/pass 를 다시 required(...) 로 되돌린다.

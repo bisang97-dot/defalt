@@ -150,6 +150,107 @@ function formatAmount(minorUnitsStr, currency) {
   return `${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 }
 
+function formatMajor(value, currency) {
+  if (value === null || value === undefined) return "무제한";
+  return `${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
+}
+
+// 모달(확인창/알림창) 공통 헬퍼. message는 DOM 노드 또는 문자열 배열(줄 단위)을 받는다.
+function showModal(messageNodes, buttons) {
+  return new Promise((resolve) => {
+    const overlay = el("modal-overlay");
+    const messageBox = el("modal-message");
+    messageBox.replaceChildren(...messageNodes);
+
+    const actions = el("modal-actions");
+    actions.replaceChildren();
+    for (const btn of buttons) {
+      const button = document.createElement("button");
+      button.className = btn.primary ? "btn btn-primary" : "btn btn-secondary";
+      button.textContent = btn.label;
+      button.addEventListener("click", () => {
+        overlay.classList.add("hidden");
+        resolve(btn.value);
+      });
+      actions.appendChild(button);
+    }
+    overlay.classList.remove("hidden");
+  });
+}
+
+function textNode(text) {
+  const p = document.createElement("p");
+  p.textContent = text;
+  return p;
+}
+
+/** 예/아니오 확인창. 사용자가 "예"를 누르면 true, "아니오"를 누르면 false를 반환한다. */
+function confirmDialog(message) {
+  return showModal(
+    [textNode(message)],
+    [
+      { label: "아니오", value: false },
+      { label: "예", value: true, primary: true },
+    ]
+  );
+}
+
+/**
+ * [개발/테스트 전용] 그룹 평균 초과로 관리자에게 실제 메일이 발송되어야 할 상황을,
+ * 메일 대신 이 알림창으로 대체해서 보여준다 (서버가 내려주는 adminNotification 내용 그대로).
+ */
+function showAdminNotificationModal(notification) {
+  const nodes = [];
+
+  const title = document.createElement("h3");
+  title.textContent = `"${notification.groupName}" 그룹 평균 토큰 제한 초과 알림`;
+  nodes.push(title);
+
+  nodes.push(
+    textNode(
+      `평균 ${formatMajor(notification.averageMajorUnits, notification.currency)} — 기준값 ${formatMajor(
+        notification.thresholdMajorUnits,
+        notification.currency
+      )} 초과`
+    )
+  );
+
+  nodes.push(
+    textNode(
+      notification.recipients.length > 0
+        ? `받는 사람(전체 관리자): ${notification.recipients.join(", ")}`
+        : "받는 사람으로 설정된 관리자 이메일이 없습니다 (env/.env 의 ADMIN_NOTIFY_EMAILS 를 확인해주세요)."
+    )
+  );
+
+  const note = document.createElement("p");
+  note.className = "muted";
+  note.textContent = "[개발/테스트 전용] 지금은 실제 메일을 보내지 않고, 이 알림창으로 대신 보여줍니다.";
+  nodes.push(note);
+
+  const table = document.createElement("table");
+  table.className = "modal-table";
+  const thead = document.createElement("thead");
+  thead.innerHTML = "<tr><th>이름</th><th>이메일</th><th>적용 제한</th></tr>";
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  for (const member of notification.members) {
+    const tr = document.createElement("tr");
+    const nameTd = document.createElement("td");
+    nameTd.textContent = member.name ?? "-";
+    const emailTd = document.createElement("td");
+    emailTd.textContent = member.email;
+    const amountTd = document.createElement("td");
+    amountTd.textContent = formatMajor(member.effectiveAmountMajorUnits, notification.currency);
+    tr.append(nameTd, emailTd, amountTd);
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  nodes.push(table);
+
+  return showModal(nodes, [{ label: "확인", value: true, primary: true }]);
+}
+
 function sourceLabel(member) {
   switch (member.sourceType) {
     case "user":
@@ -219,11 +320,33 @@ function buildRow(member) {
       return;
     }
     try {
-      await api(`/api/members/${encodeURIComponent(member.userId)}/limit`, {
+      let result = await api(`/api/members/${encodeURIComponent(member.userId)}/limit`, {
         method: "PUT",
         body: { amountMajorUnits: amount },
       });
+
+      if (result.requiresConfirmation) {
+        const proceed = await confirmDialog(
+          `이 값으로 저장하면 "${result.groupName}" 그룹의 평균 토큰 제한이 ${formatMajor(
+            result.averageMajorUnits,
+            result.currency
+          )} 로 기준값 ${formatMajor(result.thresholdMajorUnits, result.currency)} 을 초과합니다. ` +
+            `그래도 진행하시겠습니까?`
+        );
+        if (!proceed) {
+          showBanner("저장을 취소했습니다.", "info");
+          return;
+        }
+        result = await api(`/api/members/${encodeURIComponent(member.userId)}/limit`, {
+          method: "PUT",
+          body: { amountMajorUnits: amount, confirmed: true },
+        });
+      }
+
       showBanner(`${member.email} 님의 개인별 제한을 저장했습니다.`, "success");
+      if (result.adminNotification) {
+        await showAdminNotificationModal(result.adminNotification);
+      }
       await loadMembers();
     } catch (err) {
       showBanner(err.message, "error");

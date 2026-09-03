@@ -1,11 +1,14 @@
 import { Router } from "express";
+import { config } from "../config";
 import { requireAuth } from "../middleware/auth";
 import { requireAdminApiKey } from "../middleware/adminKey";
 import { getOrgUsers, getOrgGroups, getGroupMembership } from "../services/orgDirectory";
 import { deleteSpendLimit, listEffectiveSpendLimits, setUserSpendLimit } from "../services/anthropicAdmin";
 import { getAllGroupAssignments } from "../services/groupMaster";
+// [개발/테스트 전용 모드] 실제 발송 대신 응답으로 내려서 화면 알림창으로 보여준다. 운영 전환 시 아래 import와 호출을 복원한다.
+// import { sendGroupAverageAlertEmail } from "../services/mailer";
 import { errorDetail } from "../utils/errorDetail";
-import type { EffectiveSpendLimitRow, MemberView, SpendLimitSource } from "../types";
+import type { EffectiveSpendLimitRow, GroupAverageAlert, MemberView, SpendLimitSource } from "../types";
 
 export const membersRouter = Router();
 membersRouter.use(requireAuth);
@@ -217,21 +220,86 @@ membersRouter.get("/", async (req, res) => {
 membersRouter.put("/:userId/limit", async (req, res) => {
   const { userId } = req.params;
   const amount = req.body?.amountMajorUnits;
+  const confirmed = req.body?.confirmed === true;
 
   if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
     res.status(400).json({ error: "올바른 금액을 입력해주세요 (0 이상의 숫자)." });
     return;
   }
 
-  const amountMinorUnits = Math.round(amount * 100).toString();
+  const amountMinorUnits = Math.round(amount * 100);
 
   try {
     if (!(await isTargetInViewersGroup(req.adminApiKey!, req.user!.email, userId))) {
       res.status(403).json({ error: "같은 그룹의 구성원만 관리할 수 있습니다." });
       return;
     }
-    const result = await setUserSpendLimit(req.adminApiKey!, userId, amountMinorUnits);
-    res.json({ ok: true, spendLimit: result });
+
+    // 이 값을 저장하면 그룹 평균이 얼마가 되는지 먼저 계산한다: 그룹 내 다른 사람은 지금 적용 중인 값을,
+    // 이 사람은 저장하려는 새 값을 사용한다. 제한이 없는(null) 멤버는 평균 계산에서 뺀다.
+    const before = await buildMemberViews(req.adminApiKey!, req.user!.email);
+    const groupName = before.groups[0]?.name ?? "";
+    const currency = before.members[0]?.currency ?? "USD";
+
+    let sum = 0;
+    let count = 0;
+    for (const member of before.members) {
+      const minorAmount =
+        member.userId === userId
+          ? amountMinorUnits
+          : member.effectiveAmount !== null
+            ? Number(member.effectiveAmount)
+            : null;
+      if (minorAmount !== null && Number.isFinite(minorAmount)) {
+        sum += minorAmount;
+        count += 1;
+      }
+    }
+    const averageMinorUnits = count > 0 ? sum / count : amountMinorUnits;
+    const thresholdMinorUnits = config.groupAvgLimitAlertThresholdUsd * 100;
+    const exceedsThreshold = averageMinorUnits > thresholdMinorUnits;
+
+    if (exceedsThreshold && !confirmed) {
+      // 아직 저장하지 않고, 클라이언트가 확인창을 띄울 수 있도록 계산 결과만 돌려준다.
+      res.json({
+        requiresConfirmation: true,
+        groupName,
+        currency,
+        averageMajorUnits: averageMinorUnits / 100,
+        thresholdMajorUnits: config.groupAvgLimitAlertThresholdUsd,
+      });
+      return;
+    }
+
+    const result = await setUserSpendLimit(req.adminApiKey!, userId, String(amountMinorUnits));
+
+    let adminNotification: GroupAverageAlert | undefined;
+    if (exceedsThreshold) {
+      // 저장 후 최신 상태로 다시 조회해서 그룹 현황을 만든다.
+      const after = await buildMemberViews(req.adminApiKey!, req.user!.email);
+      adminNotification = {
+        groupName,
+        currency,
+        averageMajorUnits: averageMinorUnits / 100,
+        thresholdMajorUnits: config.groupAvgLimitAlertThresholdUsd,
+        recipients: config.adminNotifyEmails,
+        members: after.members.map((member) => ({
+          email: member.email,
+          name: member.name,
+          effectiveAmountMajorUnits: member.effectiveAmount !== null ? Number(member.effectiveAmount) / 100 : null,
+        })),
+      };
+
+      // [개발/테스트 전용 모드] 실제 메일 발송 대신 콘솔에 남기고, 응답(adminNotification)으로 화면 알림창에 보여준다.
+      // 운영 전환 시: await sendGroupAverageAlertEmail(adminNotification);
+      console.log(
+        `[members] "${groupName}" 그룹 평균(${adminNotification.averageMajorUnits.toFixed(2)} ${currency})이 ` +
+          `기준값(${config.groupAvgLimitAlertThresholdUsd} ${currency})을 초과 - 관리자 알림(개발 모드, 미발송):`,
+        config.adminNotifyEmails
+      );
+    }
+
+    res.json({ ok: true, spendLimit: result, adminNotification });
   } catch (err) {
     console.error("[members] set limit failed", err);
     res.status(502).json({ error: "개인별 토큰 제한 설정에 실패했습니다.", detail: errorDetail(err) });

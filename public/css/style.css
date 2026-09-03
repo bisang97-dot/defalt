@@ -158,4 +158,35 @@ th { background: #fafafa; color: var(--muted); font-weight: 600; }
   color: #065f46;
 }
 
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 17, 21, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 100;
+}
+
+.modal-box {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 520px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+.modal-message { font-size: 14px; line-height: 1.6; }
+.modal-message h3 { margin: 0 0 8px; font-size: 16px; }
+.modal-message p { margin: 0 0 8px; }
+
+.modal-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+.modal-table th, .modal-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; }
+
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+
 .hidden { display: none !important; }
