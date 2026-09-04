@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import { config } from "./config";
 import { authRouter } from "./routes/auth";
 import { membersRouter } from "./routes/members";
+import { usageRouter } from "./routes/usage";
 
 const app = express();
 
@@ -13,6 +14,7 @@ app.use(cookieParser());
 
 app.use("/api/auth", authRouter);
 app.use("/api/members", membersRouter);
+app.use("/api/usage", usageRouter);
 
 app.use(express.static(path.join(__dirname, "..", "public")));
 

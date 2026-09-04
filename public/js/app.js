@@ -397,4 +397,100 @@ async function loadMembers() {
   }
 }
 
+// ---- 탭 전환 (센터별 토큰 관리 / 기간별 토큰 조회) ----
+const tabButtons = { center: el("tab-btn-center"), period: el("tab-btn-period") };
+const tabPanels = { center: el("tab-center"), period: el("tab-period") };
+
+function showTab(name) {
+  for (const key of Object.keys(tabPanels)) {
+    tabPanels[key].classList.toggle("hidden", key !== name);
+    tabButtons[key].classList.toggle("active", key === name);
+  }
+}
+
+tabButtons.center.addEventListener("click", () => showTab("center"));
+tabButtons.period.addEventListener("click", () => showTab("period"));
+
+// ---- 기간별 토큰 조회 ----
+function populateSelect(select, options, selected) {
+  select.replaceChildren(
+    ...options.map((value) => {
+      const opt = document.createElement("option");
+      opt.value = String(value);
+      opt.textContent = String(value);
+      if (value === selected) opt.selected = true;
+      return opt;
+    })
+  );
+}
+
+function populatePeriodSelectors() {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  const years = [];
+  for (let y = currentYear - 3; y <= currentYear + 1; y++) years.push(y);
+  const months = Array.from({ length: 12 }, (_, i) => i + 1);
+
+  populateSelect(el("period-start-year"), years, currentYear);
+  populateSelect(el("period-start-month"), months, currentMonth);
+  populateSelect(el("period-end-year"), years, currentYear);
+  populateSelect(el("period-end-month"), months, currentMonth);
+}
+
+function buildPeriodRow(member, currency) {
+  const tr = document.createElement("tr");
+  const nameTd = document.createElement("td");
+  nameTd.textContent = member.name ?? "-";
+  const emailTd = document.createElement("td");
+  emailTd.textContent = member.email;
+  const usageTd = document.createElement("td");
+  usageTd.textContent = formatMajor(member.usageMajorUnits, currency);
+  tr.append(nameTd, emailTd, usageTd);
+  return tr;
+}
+
+el("form-period").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  clearBanner();
+
+  const startYear = el("period-start-year").value;
+  const startMonth = el("period-start-month").value;
+  const endYear = el("period-end-year").value;
+  const endMonth = el("period-end-month").value;
+
+  try {
+    const query = new URLSearchParams({ startYear, startMonth, endYear, endMonth }).toString();
+    const result = await api(`/api/usage?${query}`);
+
+    const resultBox = el("period-result");
+    if (!result.groupName) {
+      resultBox.classList.add("hidden");
+      showBanner(result.groupsWarning ?? "조회할 수 있는 그룹 정보가 없습니다.", "error");
+      return;
+    }
+
+    el("period-tbody").replaceChildren(...result.members.map((m) => buildPeriodRow(m, result.currency)));
+
+    const perPerson =
+      result.memberCount > 0 && result.months > 0 ? result.budgetMajorUnits / result.memberCount / result.months : null;
+    el("period-budget-label").textContent =
+      perPerson !== null
+        ? `기준 금액 (인원 ${result.memberCount}명 × ${formatMajor(perPerson, result.currency)} × ${result.months}개월)`
+        : "기준 금액";
+    el("period-total").textContent = formatMajor(result.totalUsageMajorUnits, result.currency);
+    el("period-budget").textContent = formatMajor(result.budgetMajorUnits, result.currency);
+    el("period-available").textContent = formatMajor(result.availableMajorUnits, result.currency);
+    resultBox.classList.remove("hidden");
+
+    if (result.groupsWarning) {
+      showBanner(result.groupsWarning, "error");
+    }
+  } catch (err) {
+    showBanner(err.message, "error");
+  }
+});
+
+populatePeriodSelectors();
+
 init();

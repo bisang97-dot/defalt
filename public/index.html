@@ -52,28 +52,85 @@
 
     <!-- 3단계: 대시보드 -->
     <section id="view-dashboard" class="hidden">
-      <div class="dashboard-header">
-        <h2>조직 구성원 토큰 제한</h2>
-        <button id="btn-refresh" class="btn btn-secondary">새로고침</button>
+      <div class="tab-bar">
+        <button id="tab-btn-center" class="tab-btn active" type="button">센터별 토큰 관리</button>
+        <button id="tab-btn-period" class="tab-btn" type="button">기간별 토큰 조회</button>
       </div>
-      <p class="muted">
-        금액은 조직 결제 통화 기준입니다. "그룹 기준"은 해당 멤버가 속한 그룹에 설정된 한도이며, 개인별 제한을 설정하면 그룹/등급 기준을 덮어씁니다.
-      </p>
-      <div class="table-wrap">
-        <table id="members-table">
-          <thead>
-            <tr>
-              <th>이름</th>
-              <th>이메일</th>
-              <th>소속 그룹</th>
-              <th>그룹 기준 제한</th>
-              <th>현재 적용 제한 (출처)</th>
-              <th>이번 기간 사용액</th>
-              <th>개인별 제한 설정</th>
-            </tr>
-          </thead>
-          <tbody id="members-tbody"></tbody>
-        </table>
+
+      <!-- 탭 1: 센터별 토큰 관리 (기존 화면) -->
+      <div id="tab-center">
+        <div class="dashboard-header">
+          <h2>조직 구성원 토큰 제한</h2>
+          <button id="btn-refresh" class="btn btn-secondary">새로고침</button>
+        </div>
+        <p class="muted">
+          금액은 조직 결제 통화 기준입니다. "그룹 기준"은 해당 멤버가 속한 그룹에 설정된 한도이며, 개인별 제한을 설정하면 그룹/등급 기준을 덮어씁니다.
+        </p>
+        <div class="table-wrap">
+          <table id="members-table">
+            <thead>
+              <tr>
+                <th>이름</th>
+                <th>이메일</th>
+                <th>소속 그룹</th>
+                <th>그룹 기준 제한</th>
+                <th>현재 적용 제한 (출처)</th>
+                <th>이번 기간 사용액</th>
+                <th>개인별 제한 설정</th>
+              </tr>
+            </thead>
+            <tbody id="members-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 탭 2: 기간별 토큰 조회 -->
+      <div id="tab-period" class="hidden">
+        <div class="dashboard-header">
+          <h2>기간별 토큰 조회</h2>
+        </div>
+        <form id="form-period" class="period-form">
+          <div class="period-field">
+            <label>시작</label>
+            <select id="period-start-year"></select>
+            <select id="period-start-month"></select>
+          </div>
+          <div class="period-field">
+            <label>종료</label>
+            <select id="period-end-year"></select>
+            <select id="period-end-month"></select>
+          </div>
+          <button type="submit" class="btn btn-primary">조회</button>
+        </form>
+
+        <div id="period-result" class="hidden">
+          <div class="table-wrap">
+            <table id="period-table">
+              <thead>
+                <tr>
+                  <th>이름</th>
+                  <th>이메일</th>
+                  <th>기간 사용액</th>
+                </tr>
+              </thead>
+              <tbody id="period-tbody"></tbody>
+            </table>
+          </div>
+          <div class="period-summary">
+            <div class="summary-row">
+              <span>사용량 합계</span>
+              <span id="period-total"></span>
+            </div>
+            <div class="summary-row">
+              <span id="period-budget-label">기준 금액</span>
+              <span id="period-budget"></span>
+            </div>
+            <div class="summary-row highlight">
+              <span>사용 가능 토큰</span>
+              <span id="period-available"></span>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   </main>

@@ -2,78 +2,16 @@ import { Router } from "express";
 import { config } from "../config";
 import { requireAuth } from "../middleware/auth";
 import { requireAdminApiKey } from "../middleware/adminKey";
-import { getOrgUsers, getOrgGroups, getGroupMembership } from "../services/orgDirectory";
 import { deleteSpendLimit, listEffectiveSpendLimits, setUserSpendLimit } from "../services/anthropicAdmin";
-import { getAllGroupAssignments } from "../services/groupMaster";
+import { getGroupScope, groupNotFoundWarning, resolveGroup, resolveSourceGroupId } from "../services/groupResolution";
 // [개발/테스트 전용 모드] 실제 발송 대신 응답으로 내려서 화면 알림창으로 보여준다. 운영 전환 시 아래 import와 호출을 복원한다.
 // import { sendGroupAverageAlertEmail } from "../services/mailer";
 import { errorDetail } from "../utils/errorDetail";
-import type { EffectiveSpendLimitRow, GroupAverageAlert, MemberView, SpendLimitSource } from "../types";
+import type { EffectiveSpendLimitRow, GroupAverageAlert, MemberView } from "../types";
 
 export const membersRouter = Router();
 membersRouter.use(requireAuth);
 membersRouter.use(requireAdminApiKey);
-
-function resolveSourceGroupId(source: SpendLimitSource): string | null {
-  if (typeof source.rbac_group_id === "string") return source.rbac_group_id;
-  if (typeof source.group_id === "string") return source.group_id;
-  return null;
-}
-
-interface AnthropicGroupData {
-  groupNameById: Map<string, string>;
-  groupNameByUserId: Map<string, string>;
-}
-
-async function loadAnthropicGroupData(apiKey: string): Promise<AnthropicGroupData> {
-  const groups = await getOrgGroups(apiKey);
-  const membership = await getGroupMembership(apiKey); // groupId -> userId[]
-
-  const groupNameById = new Map(groups.map((g) => [g.id, g.name] as const));
-  const groupNameByUserId = new Map<string, string>();
-  for (const [groupId, userIds] of membership.entries()) {
-    const name = groupNameById.get(groupId);
-    if (!name) continue;
-    for (const userId of userIds) groupNameByUserId.set(userId, name);
-  }
-
-  return { groupNameById, groupNameByUserId };
-}
-
-interface GroupContext {
-  fileGroupByEmail: Map<string, string>;
-  anthropicGroups: AnthropicGroupData;
-  anthropicGroupsWarning?: string;
-}
-
-/**
- * 소속 그룹은 두 곳을 함께 본다:
- *  1) env/group_master.env 의 "이메일 -> 그룹명" 매핑 (수동 관리, 이메일 기준)
- *  2) Claude Enterprise 에 실제 등록된 RBAC 그룹 (Admin API, 계정 기준)
- * group_master.env 매핑이 있으면 그걸 우선하고, 없으면 Anthropic 쪽 그룹명을 그대로 쓴다.
- * Anthropic 그룹 조회가 이 Admin API 키의 권한/스코프 문제로 실패해도 전체 요청을 막지 않고,
- * env/group_master.env 매핑만으로 동작하도록 낮춘다(대신 그 사실을 경고로 알린다).
- */
-async function loadGroupContext(apiKey: string): Promise<GroupContext> {
-  const fileGroupByEmail = getAllGroupAssignments();
-  try {
-    const anthropicGroups = await loadAnthropicGroupData(apiKey);
-    return { fileGroupByEmail, anthropicGroups };
-  } catch (err) {
-    console.error("[members] Anthropic RBAC 그룹 조회 실패, env/group_master.env 매핑만 사용", err);
-    return {
-      fileGroupByEmail,
-      anthropicGroups: { groupNameById: new Map(), groupNameByUserId: new Map() },
-      anthropicGroupsWarning: `Claude Enterprise 그룹 정보를 가져오지 못했습니다 (${
-        errorDetail(err) ?? "알 수 없는 오류"
-      }). env/group_master.env 에 등록된 매핑만 적용됩니다.`,
-    };
-  }
-}
-
-function resolveGroup(ctx: GroupContext, userId: string, email: string): string | null {
-  return ctx.fileGroupByEmail.get(email.toLowerCase()) ?? ctx.anthropicGroups.groupNameByUserId.get(userId) ?? null;
-}
 
 async function buildMemberViews(
   apiKey: string,
@@ -83,27 +21,15 @@ async function buildMemberViews(
   groups: { id: string; name: string }[];
   groupsWarning?: string;
 }> {
-  const [allUsers, effectiveRows, ctx] = await Promise.all([
-    getOrgUsers(apiKey),
+  const [effectiveRows, scope] = await Promise.all([
     listEffectiveSpendLimits(apiKey),
-    loadGroupContext(apiKey),
+    getGroupScope(apiKey, viewerEmail),
   ]);
-
-  const viewer = allUsers.find((u) => u.email.toLowerCase() === viewerEmail.toLowerCase());
-  const myGroup = viewer
-    ? resolveGroup(ctx, viewer.id, viewer.email)
-    : ctx.fileGroupByEmail.get(viewerEmail.toLowerCase()) ?? null;
+  const { ctx, allUsers, myGroup, groupMembers: users } = scope;
 
   if (!myGroup) {
-    const reason = ctx.anthropicGroupsWarning ? ` (${ctx.anthropicGroupsWarning})` : "";
-    return {
-      members: [],
-      groups: [],
-      groupsWarning: `본인 계정(${viewerEmail})의 소속 그룹을 확인할 수 없어 조회할 수 있는 구성원이 없습니다. env/group_master.env 에 등록하거나, Claude Enterprise 에서 그룹을 배정해주세요.${reason}`,
-    };
+    return { members: [], groups: [], groupsWarning: groupNotFoundWarning(viewerEmail, ctx) };
   }
-
-  const users = allUsers.filter((user) => resolveGroup(ctx, user.id, user.email) === myGroup);
 
   const rowByUserId = new Map<string, EffectiveSpendLimitRow>();
   for (const row of effectiveRows) {
@@ -190,18 +116,9 @@ async function buildMemberViews(
  * 그룹 제한이 실질적인 접근 제어가 된다 (그냥 목록만 가려주는 건 우회가 쉽다).
  */
 async function isTargetInViewersGroup(apiKey: string, viewerEmail: string, targetUserId: string): Promise<boolean> {
-  const [allUsers, ctx] = await Promise.all([getOrgUsers(apiKey), loadGroupContext(apiKey)]);
-
-  const viewer = allUsers.find((u) => u.email.toLowerCase() === viewerEmail.toLowerCase());
-  const myGroup = viewer
-    ? resolveGroup(ctx, viewer.id, viewer.email)
-    : ctx.fileGroupByEmail.get(viewerEmail.toLowerCase()) ?? null;
+  const { myGroup, groupMembers } = await getGroupScope(apiKey, viewerEmail);
   if (!myGroup) return false;
-
-  const target = allUsers.find((u) => u.id === targetUserId);
-  if (!target) return false;
-
-  return resolveGroup(ctx, target.id, target.email) === myGroup;
+  return groupMembers.some((u) => u.id === targetUserId);
 }
 
 membersRouter.get("/", async (req, res) => {

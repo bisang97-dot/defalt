@@ -154,6 +154,36 @@ export async function listEffectiveSpendLimits(apiKey: string): Promise<Effectiv
   });
 }
 
+interface RawUserCostRow {
+  actor: { user_id: string; email: string; [key: string]: unknown };
+  amount: string;
+}
+
+export interface UserCostRow {
+  userId: string;
+  email: string;
+  /** 해당 기간 동안의 지출, 조직 결제 통화의 최소 단위(minor unit, 예: 센트) 문자열. */
+  amountMinorUnits: string;
+}
+
+/**
+ * 사용자별 기간 지출 리포트 (Analytics API). Admin API 키에 `read:analytics` 스코프가 필요하다.
+ * startingAt/endingAt 은 ISO 8601 (UTC) 문자열이며, endingAt 은 배타적(exclusive) 상한이다.
+ * bucket_width 를 지정하지 않으면 그 기간 전체를 사용자별로 합산한 한 행씩만 돌아온다.
+ */
+export async function getUserCostReport(
+  apiKey: string,
+  startingAt: string,
+  endingAt: string
+): Promise<UserCostRow[]> {
+  const raw = await paginateAll<RawUserCostRow>(apiKey, "/v1/organizations/analytics/user_cost_report", {
+    starting_at: startingAt,
+    ending_at: endingAt,
+    limit: "1000",
+  });
+  return raw.map((row) => ({ userId: row.actor.user_id, email: row.actor.email, amountMinorUnits: row.amount }));
+}
+
 /**
  * 개인별(override) 토큰 사용 한도를 설정한다. amount 는 조직 결제 통화의 최소 단위(minor unit, 예: 센트) 문자열이어야 한다.
  */
