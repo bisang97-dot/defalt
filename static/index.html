@@ -1,41 +1,87 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>비품 신청 관리</title>
-  <link rel="stylesheet" href="/style.css">
+  <title>비품 신청·재고 관리</title>
+  <!-- 브라우저 탭 아이콘 없음 (아이콘 파일 요청 오류 방지) -->
+  <link rel="icon" href="data:,">
+  <!-- 화면 모양(디자인) 파일 -->
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main>
-    <h1>비품 신청 관리</h1>
+  <header class="page-header">
+    <h1>비품 신청·재고 관리</h1>
+    <p class="subtitle">총무팀 비품 신청을 등록하고 진행 상태를 관리합니다.</p>
+  </header>
 
+  <main>
+    <!-- ① 상단: 비품 신청 등록 폼 -->
     <section class="card">
       <h2>비품 신청 등록</h2>
       <form id="request-form">
-        <label>신청자 <input name="requester" required maxlength="50"></label>
-        <label>비품명 <input name="item" required maxlength="100"></label>
-        <label>수량 <input name="quantity" type="number" min="1" value="1" required></label>
-        <label class="wide">신청 사유 <input name="reason" maxlength="200"></label>
-        <button type="submit">신청 등록</button>
+        <div class="form-grid">
+          <label>신청자
+            <input type="text" name="requester" placeholder="예: 신청자 Z" required>
+          </label>
+          <label>신청 부서
+            <input type="text" name="department" placeholder="예: 가상팀1" required>
+          </label>
+          <label>비품
+            <input type="text" name="item" placeholder="예: A4 용지" required>
+          </label>
+          <label>수량
+            <input type="number" name="quantity" min="1" value="1" required>
+          </label>
+          <label>카테고리
+            <select name="category" required>
+              <option value="사무용품">사무용품</option>
+              <option value="전산소모품">전산소모품</option>
+              <option value="생활용품">생활용품</option>
+              <option value="기타">기타</option>
+            </select>
+          </label>
+          <label class="full">사유
+            <textarea name="reason" rows="2" placeholder="예: 회의실 비치용"></textarea>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">신청 등록</button>
+        </div>
       </form>
-      <p id="message" class="message" role="status"></p>
     </section>
 
+    <!-- ② 하단: 비품 신청 목록 -->
     <section class="card">
-      <h2>신청 목록</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>번호</th><th>신청일</th><th>신청자</th><th>비품명</th>
-            <th>수량</th><th>사유</th><th>상태</th><th>삭제</th>
-          </tr>
-        </thead>
-        <tbody id="request-list"></tbody>
-      </table>
-      <p id="empty" class="empty" hidden>등록된 신청이 없습니다.</p>
+      <div class="list-header">
+        <h2>비품 신청 목록</h2>
+        <!-- 상태별 건수가 이곳에 표시됩니다 -->
+        <p id="summary" class="summary"></p>
+      </div>
+      <div class="table-wrap">
+        <table id="request-table">
+          <thead>
+            <tr>
+              <th>신청자</th>
+              <th>비품</th>
+              <th>수량</th>
+              <th>상태</th>
+              <th>카테고리</th>
+              <th>신청 부서</th>
+              <th>사유</th>
+              <th>신청일</th>
+              <th>관리</th>
+            </tr>
+          </thead>
+          <tbody id="request-rows">
+            <!-- 자바스크립트(app.js)가 이곳에 신청 목록을 채웁니다 -->
+          </tbody>
+        </table>
+      </div>
     </section>
   </main>
-  <script src="/app.js"></script>
+
+  <!-- 화면 동작 파일 -->
+  <script src="app.js"></script>
 </body>
 </html>

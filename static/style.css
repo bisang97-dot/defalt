@@ -1,30 +1,25 @@
-* { box-sizing: border-box; }
+/* =====================================================================
+   비품 신청·재고 관리 앱 - 화면 모양(디자인)
+   지금은 일부러 최소한의 기본 스타일만 넣었습니다.
+   (실습 3에서 디자인 스킬로 개선합니다)
+   ===================================================================== */
+
 body {
-  margin: 0;
-  font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
-  background: #f4f5f7;
-  color: #222;
+  font-family: sans-serif;
+  margin: 16px;
 }
-main { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
-h1 { font-size: 24px; margin: 0 0 16px; }
-h2 { font-size: 18px; margin: 0 0 12px; }
-.card {
-  background: #fff;
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  overflow-x: auto;
+
+table {
+  border-collapse: collapse;
 }
-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
-label { display: flex; flex-direction: column; font-size: 14px; gap: 4px; }
-label.wide { flex: 1; min-width: 200px; }
-input, select { padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
-button { padding: 7px 14px; border: none; border-radius: 4px; background: #2f6fde; color: #fff; cursor: pointer; font-size: 14px; }
-button.delete { background: #d9443f; padding: 5px 10px; }
-.message { min-height: 1.2em; margin: 8px 0 0; font-size: 14px; }
-.message.error { color: #d9443f; }
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; white-space: nowrap; }
-th { background: #fafafa; }
-.empty { color: #777; font-size: 14px; }
+
+th,
+td {
+  border: 1px solid #999;
+  padding: 4px 6px;
+}
+
+label {
+  display: block;
+  margin-bottom: 6px;
+}

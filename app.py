@@ -1,191 +1,69 @@
-"""총무팀 비품 신청·재고 관리 앱.
+# -*- coding: utf-8 -*-
+"""
+비품 신청·재고 관리 앱 - 서버 프로그램
 
-Python 표준 라이브러리만 사용합니다. 신청 데이터는 SQLite 파일(supplies.db)에
-저장되므로 서버를 재시작해도 남아 있습니다.
+실행 방법:  python app.py
+접속 주소:  http://localhost:8000
 
-실행: python app.py  →  http://localhost:8000
+[지금 단계(step-0)의 특징]
+- 이 서버는 static 폴더의 화면 파일(HTML/CSS/JS)을 브라우저에 보내 주기만 합니다.
+- 데이터는 브라우저의 자바스크립트 변수에만 들어 있습니다.
+  그래서 브라우저를 새로고침하면 등록한 신청이 사라지고 기본 데이터 25건만 다시 보입니다.
+- 파이썬 기본 기능(표준 라이브러리)만 사용합니다. 따로 설치할 것이 없습니다.
 """
 
-import json
 import os
-import sqlite3
-from datetime import datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
-BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
-DB_PATH = Path(os.environ.get("SUPPLY_DB_PATH", BASE_DIR / "supplies.db"))
-PORT = int(os.environ.get("PORT", "8000"))
+# 서버 주소와 포트 번호
+HOST = "127.0.0.1"
+PORT = 8000
 
-STATUSES = ["접수", "승인", "지급 완료"]
-
-STATIC_TYPES = {
-    ".html": "text/html; charset=utf-8",
-    ".css": "text/css; charset=utf-8",
-    ".js": "application/javascript; charset=utf-8",
-}
+# 화면 파일(HTML/CSS/JS)이 들어 있는 폴더 위치
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+class AppHandler(SimpleHTTPRequestHandler):
+    """브라우저의 요청을 받아 static 폴더의 파일을 돌려주는 담당자"""
 
+    # 파일 종류별로 브라우저에 알려 줄 형식 (한글이 깨지지 않도록 utf-8 지정)
+    extensions_map = {
+        ".html": "text/html; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".js": "text/javascript; charset=utf-8",
+        ".json": "application/json; charset=utf-8",
+        ".svg": "image/svg+xml",
+        ".png": "image/png",
+        ".ico": "image/x-icon",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+        ".ttf": "font/ttf",
+        ".otf": "font/otf",
+        "": "application/octet-stream",
+    }
 
-def init_db():
-    with get_conn() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS requests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                requester TEXT NOT NULL,
-                item TEXT NOT NULL,
-                quantity INTEGER NOT NULL CHECK (quantity > 0),
-                reason TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL DEFAULT '접수',
-                created_at TEXT NOT NULL
-            )
-            """
-        )
+    def __init__(self, *args, **kwargs):
+        # static 폴더를 기준으로 파일을 찾도록 설정
+        super().__init__(*args, directory=STATIC_DIR, **kwargs)
 
-
-def row_to_dict(row):
-    return {key: row[key] for key in row.keys()}
-
-
-def list_requests():
-    with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM requests ORDER BY id DESC").fetchall()
-    return [row_to_dict(r) for r in rows]
-
-
-def create_request(data):
-    requester = str(data.get("requester", "")).strip()
-    item = str(data.get("item", "")).strip()
-    reason = str(data.get("reason", "")).strip()
-    try:
-        quantity = int(data.get("quantity", 0))
-    except (TypeError, ValueError):
-        quantity = 0
-    if not requester or not item:
-        raise ValueError("신청자와 비품명을 입력해 주세요.")
-    if quantity <= 0:
-        raise ValueError("수량은 1 이상이어야 합니다.")
-    created_at = datetime.now().strftime("%Y-%m-%d %H:%M")
-    with get_conn() as conn:
-        cur = conn.execute(
-            "INSERT INTO requests (requester, item, quantity, reason, status, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (requester, item, quantity, reason, STATUSES[0], created_at),
-        )
-        row = conn.execute("SELECT * FROM requests WHERE id = ?", (cur.lastrowid,)).fetchone()
-    return row_to_dict(row)
-
-
-def update_status(request_id, status):
-    if status not in STATUSES:
-        raise ValueError("알 수 없는 상태입니다.")
-    with get_conn() as conn:
-        cur = conn.execute("UPDATE requests SET status = ? WHERE id = ?", (status, request_id))
-        if cur.rowcount == 0:
-            return None
-        row = conn.execute("SELECT * FROM requests WHERE id = ?", (request_id,)).fetchone()
-    return row_to_dict(row)
-
-
-def delete_request(request_id):
-    with get_conn() as conn:
-        cur = conn.execute("DELETE FROM requests WHERE id = ?", (request_id,))
-    return cur.rowcount > 0
-
-
-class Handler(BaseHTTPRequestHandler):
-    def send_json(self, status, payload):
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def read_json(self):
-        length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(length) if length else b"{}"
-        try:
-            data = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            raise ValueError("요청 형식이 올바르지 않습니다.")
-        if not isinstance(data, dict):
-            raise ValueError("요청 형식이 올바르지 않습니다.")
-        return data
-
-    def request_id(self):
-        """'/api/requests/<id>' 형태의 경로에서 id를 꺼냅니다."""
-        parts = self.path.split("?")[0].strip("/").split("/")
-        if len(parts) == 3 and parts[:2] == ["api", "requests"] and parts[2].isdigit():
-            return int(parts[2])
-        return None
-
-    def do_GET(self):
-        path = self.path.split("?")[0]
-        if path == "/api/requests":
-            return self.send_json(200, list_requests())
-        if path == "/":
-            path = "/index.html"
-        file_path = (STATIC_DIR / path.lstrip("/")).resolve()
-        if (
-            STATIC_DIR.resolve() in file_path.parents
-            and file_path.is_file()
-            and file_path.suffix in STATIC_TYPES
-        ):
-            body = file_path.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", STATIC_TYPES[file_path.suffix])
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        self.send_json(404, {"error": "페이지를 찾을 수 없습니다."})
-
-    def do_POST(self):
-        if self.path.split("?")[0] != "/api/requests":
-            return self.send_json(404, {"error": "페이지를 찾을 수 없습니다."})
-        try:
-            created = create_request(self.read_json())
-        except ValueError as e:
-            return self.send_json(400, {"error": str(e)})
-        self.send_json(201, created)
-
-    def do_PATCH(self):
-        request_id = self.request_id()
-        if request_id is None:
-            return self.send_json(404, {"error": "페이지를 찾을 수 없습니다."})
-        try:
-            updated = update_status(request_id, self.read_json().get("status"))
-        except ValueError as e:
-            return self.send_json(400, {"error": str(e)})
-        if updated is None:
-            return self.send_json(404, {"error": "해당 신청을 찾을 수 없습니다."})
-        self.send_json(200, updated)
-
-    def do_DELETE(self):
-        request_id = self.request_id()
-        if request_id is None:
-            return self.send_json(404, {"error": "페이지를 찾을 수 없습니다."})
-        if not delete_request(request_id):
-            return self.send_json(404, {"error": "해당 신청을 찾을 수 없습니다."})
-        self.send_json(200, {"ok": True})
+    def end_headers(self):
+        # 화면 파일을 고친 뒤 새로고침하면 바로 반영되도록 캐시를 끕니다.
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
 
 
 def main():
-    init_db()
-    server = ThreadingHTTPServer(("", PORT), Handler)
-    print(f"비품 신청 앱 실행 중: http://localhost:{PORT}  (DB: {DB_PATH})")
+    server = ThreadingHTTPServer((HOST, PORT), AppHandler)
+    print("=" * 50)
+    print(" 비품 신청·재고 관리 앱이 시작되었습니다.")
+    print(f" 브라우저에서 http://localhost:{PORT} 로 접속하세요.")
+    print(" 종료하려면 이 창에서 Ctrl + C 를 누르세요.")
+    print("=" * 50)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        pass
+        print("\n서버를 종료합니다.")
     finally:
         server.server_close()
 
