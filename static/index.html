@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>비품 신청 관리</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <h1>비품 신청 관리</h1>
+
+    <section class="card">
+      <h2>비품 신청 등록</h2>
+      <form id="request-form">
+        <label>신청자 <input name="requester" required maxlength="50"></label>
+        <label>비품명 <input name="item" required maxlength="100"></label>
+        <label>수량 <input name="quantity" type="number" min="1" value="1" required></label>
+        <label class="wide">신청 사유 <input name="reason" maxlength="200"></label>
+        <button type="submit">신청 등록</button>
+      </form>
+      <p id="message" class="message" role="status"></p>
+    </section>
+
+    <section class="card">
+      <h2>신청 목록</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>번호</th><th>신청일</th><th>신청자</th><th>비품명</th>
+            <th>수량</th><th>사유</th><th>상태</th><th>삭제</th>
+          </tr>
+        </thead>
+        <tbody id="request-list"></tbody>
+      </table>
+      <p id="empty" class="empty" hidden>등록된 신청이 없습니다.</p>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -5,3 +5,6 @@ env/.env
 env/group_master.env
 *.log
 .DS_Store
+# 비품 신청 앱 SQLite DB (실행 시 자동 생성)
+supplies.db
+__pycache__/
