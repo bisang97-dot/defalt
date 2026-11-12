@@ -1,82 +1,92 @@
 // =====================================================================
 // 비품 신청·재고 관리 앱 - 화면 동작
 //
-// [지금 단계(step-0)의 특징]
-// - 신청 데이터는 아래 requests 변수(브라우저 메모리)에만 저장됩니다.
-// - 그래서 새로고침하면 등록·변경·삭제한 내용이 모두 사라지고
-//   처음의 가짜 데이터 25건으로 돌아갑니다.
+// [지금 단계의 특징]
+// - 신청 데이터는 서버(app.py)의 데이터베이스(supplies.db)에 저장됩니다.
+// - 화면은 서버에서 목록을 받아 와 보여 주고,
+//   등록·상태 변경·삭제를 하면 서버에 알린 뒤 목록을 다시 받아 옵니다.
+// - 그래서 새로고침하거나 서버를 껐다 켜도 내용이 그대로 남습니다.
 // =====================================================================
 
 // 상태는 이 세 가지만 사용합니다. (순서: 접수 → 승인 → 지급 완료)
 const STATUSES = ["접수", "승인", "지급 완료"];
 
-// 미리 넣어 둔 가짜 데이터 25건 (실제 사람·부서가 아닌 연습용 데이터)
-let requests = [
-  { id: 1,  requester: "신청자 A", item: "A4 용지",       quantity: 10, category: "사무용품",   department: "가상팀1", reason: "월간 보고서 출력용",     status: "지급 완료", createdAt: "2026-10-01" },
-  { id: 2,  requester: "신청자 B", item: "볼펜",          quantity: 20, category: "사무용품",   department: "가상팀2", reason: "팀 공용 필기구 보충",    status: "지급 완료", createdAt: "2026-10-02" },
-  { id: 3,  requester: "신청자 C", item: "모니터 받침대", quantity: 2,  category: "전산소모품", department: "가상팀3", reason: "신규 자리 배치",         status: "지급 완료", createdAt: "2026-10-04" },
-  { id: 4,  requester: "신청자 D", item: "토너",          quantity: 3,  category: "전산소모품", department: "가상팀1", reason: "복합기 토너 소진",       status: "지급 완료", createdAt: "2026-10-06" },
-  { id: 5,  requester: "신청자 E", item: "마우스",        quantity: 1,  category: "전산소모품", department: "가상팀4", reason: "기존 마우스 고장",       status: "지급 완료", createdAt: "2026-10-07" },
-  { id: 6,  requester: "신청자 F", item: "포스트잇",      quantity: 15, category: "사무용품",   department: "가상팀2", reason: "회의 자료 정리용",       status: "지급 완료", createdAt: "2026-10-09" },
-  { id: 7,  requester: "신청자 G", item: "종이컵",        quantity: 5,  category: "생활용품",   department: "가상팀5", reason: "탕비실 비치용",          status: "지급 완료", createdAt: "2026-10-10" },
-  { id: 8,  requester: "신청자 H", item: "클립",          quantity: 10, category: "사무용품",   department: "가상팀3", reason: "서류 정리용",            status: "승인",      createdAt: "2026-10-13" },
-  { id: 9,  requester: "신청자 I", item: "키보드",        quantity: 1,  category: "전산소모품", department: "가상팀4", reason: "자판 일부 입력 불량",    status: "지급 완료", createdAt: "2026-10-14" },
-  { id: 10, requester: "신청자 J", item: "물티슈",        quantity: 6,  category: "생활용품",   department: "가상팀1", reason: "회의실 비치용",          status: "승인",      createdAt: "2026-10-15" },
-  { id: 11, requester: "신청자 K", item: "형광펜",        quantity: 12, category: "사무용품",   department: "가상팀5", reason: "교육 자료 표시용",       status: "지급 완료", createdAt: "2026-10-16" },
-  { id: 12, requester: "신청자 L", item: "USB 메모리",    quantity: 2,  category: "전산소모품", department: "가상팀2", reason: "자료 전달용",            status: "승인",      createdAt: "2026-10-17" },
-  { id: 13, requester: "신청자 M", item: "화이트보드 마커", quantity: 8, category: "사무용품",  department: "가상팀3", reason: "회의실 마커 교체",       status: "승인",      createdAt: "2026-10-20" },
-  { id: 14, requester: "신청자 N", item: "핸드타월",      quantity: 4,  category: "생활용품",   department: "가상팀4", reason: "화장실 비치용",          status: "지급 완료", createdAt: "2026-10-21" },
-  { id: 15, requester: "신청자 O", item: "스테이플러",    quantity: 2,  category: "사무용품",   department: "가상팀1", reason: "팀 공용 비품",           status: "승인",      createdAt: "2026-10-22" },
-  { id: 16, requester: "신청자 P", item: "HDMI 케이블",   quantity: 3,  category: "전산소모품", department: "가상팀5", reason: "회의실 발표 연결용",     status: "접수",      createdAt: "2026-10-23" },
-  { id: 17, requester: "신청자 Q", item: "커피 믹스",     quantity: 3,  category: "생활용품",   department: "가상팀2", reason: "탕비실 비치용",          status: "승인",      createdAt: "2026-10-24" },
-  { id: 18, requester: "신청자 R", item: "파일 바인더",   quantity: 10, category: "사무용품",   department: "가상팀3", reason: "계약 서류 보관용",       status: "접수",      createdAt: "2026-10-27" },
-  { id: 19, requester: "신청자 S", item: "배터리(AA)",    quantity: 20, category: "기타",       department: "가상팀4", reason: "무선 마우스·리모컨용",   status: "접수",      createdAt: "2026-10-28" },
-  { id: 20, requester: "신청자 T", item: "A4 용지",       quantity: 5,  category: "사무용품",   department: "가상팀5", reason: "교육 자료 출력용",       status: "승인",      createdAt: "2026-10-29" },
-  { id: 21, requester: "신청자 U", item: "멀티탭",        quantity: 2,  category: "기타",       department: "가상팀1", reason: "회의실 전원 부족",       status: "접수",      createdAt: "2026-10-30" },
-  { id: 22, requester: "신청자 V", item: "종이컵",        quantity: 10, category: "생활용품",   department: "가상팀2", reason: "행사 준비용",            status: "접수",      createdAt: "2026-11-02" },
-  { id: 23, requester: "신청자 W", item: "토너",          quantity: 2,  category: "전산소모품", department: "가상팀3", reason: "프린터 출력 흐림",       status: "접수",      createdAt: "2026-11-03" },
-  { id: 24, requester: "신청자 X", item: "볼펜",          quantity: 30, category: "사무용품",   department: "가상팀4", reason: "신규 입사자 지급용",     status: "접수",      createdAt: "2026-11-04" },
-  { id: 25, requester: "신청자 Y", item: "마우스",        quantity: 2,  category: "전산소모품", department: "가상팀5", reason: "예비용",                 status: "접수",      createdAt: "2026-11-05" },
-];
-
-// 다음에 등록할 신청의 번호
-let nextId = 26;
+// 서버에서 받아 온 신청 목록 (화면에 그릴 때 사용)
+let requests = [];
 
 
 // ---------------------------------------------------------------------
-// 데이터 다루기: 등록 / 상태 변경 / 삭제
+// 서버와 주고받기
 // ---------------------------------------------------------------------
 
-// 새 신청 등록
-function addRequest(data) {
-  requests.push({
-    id: nextId,
-    requester: data.requester,
-    item: data.item,
-    quantity: data.quantity,
-    category: data.category,
-    department: data.department,
-    reason: data.reason,
-    status: "접수",                // 새 신청은 항상 "접수" 상태로 시작
-    createdAt: today(),
-  });
-  nextId = nextId + 1;
-  render();
+// 서버에 요청을 보내고 결과(JSON)를 돌려받습니다. 실패하면 오류를 냅니다.
+async function callServer(method, url, body) {
+  let res;
+  try {
+    res = await fetch(url, {
+      method: method,
+      headers: body ? { "Content-Type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    throw new Error("서버에 연결할 수 없습니다. 서버(python app.py)가 켜져 있는지 확인해 주세요.");
+  }
+  const result = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(result.error || "요청을 처리하지 못했습니다.");
+  }
+  return result;
 }
 
-// 상태 변경
-function changeStatus(id, newStatus) {
-  const target = requests.find((r) => r.id === id);
-  if (target) {
-    target.status = newStatus;
+// 서버에서 최신 목록을 받아 와 화면을 다시 그립니다.
+async function loadRequests() {
+  try {
+    requests = await callServer("GET", "/api/requests");
+  } catch (err) {
+    alert(err.message);
   }
   render();
 }
 
+
+// ---------------------------------------------------------------------
+// 데이터 다루기: 등록 / 상태 변경 / 삭제
+// (서버에 저장한 뒤 목록을 다시 받아 옵니다)
+// ---------------------------------------------------------------------
+
+// 새 신청 등록 (성공하면 true)
+async function addRequest(data) {
+  try {
+    await callServer("POST", "/api/requests", data);   // 새 신청은 서버에서 "접수" 상태로 저장
+  } catch (err) {
+    alert(err.message);
+    return false;
+  }
+  await loadRequests();
+  return true;
+}
+
+// 상태 변경
+async function changeStatus(id, newStatus) {
+  try {
+    await callServer("PATCH", `/api/requests/${id}`, { status: newStatus });
+  } catch (err) {
+    alert(err.message);
+    render();                        // 실패하면 원래 상태로 다시 그리기
+    return;
+  }
+  await loadRequests();
+}
+
 // 신청 삭제
-function deleteRequest(id) {
-  requests = requests.filter((r) => r.id !== id);
-  render();
+async function deleteRequest(id) {
+  try {
+    await callServer("DELETE", `/api/requests/${id}`);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  await loadRequests();
 }
 
 
@@ -178,7 +188,7 @@ function escapeHtml(text) {
 // 등록 폼 연결 & 첫 화면 그리기
 // ---------------------------------------------------------------------
 
-document.getElementById("request-form").addEventListener("submit", (e) => {
+document.getElementById("request-form").addEventListener("submit", async (e) => {
   e.preventDefault();               // 페이지가 새로고침되지 않도록 막기
   const form = e.target;
   const quantity = Number(form.quantity.value);
@@ -192,7 +202,7 @@ document.getElementById("request-form").addEventListener("submit", (e) => {
     return;
   }
 
-  addRequest({
+  const saved = await addRequest({
     requester: form.requester.value.trim(),
     item: form.item.value.trim(),
     quantity: quantity,
@@ -201,7 +211,10 @@ document.getElementById("request-form").addEventListener("submit", (e) => {
     reason: form.reason.value.trim(),
   });
 
-  form.reset();
+  if (saved) {
+    form.reset();                   // 저장에 성공했을 때만 입력칸을 비웁니다.
+  }
 });
 
-render();
+// 첫 화면: 서버에서 목록을 받아 와 그리기
+loadRequests();
